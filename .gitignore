@@ -1,0 +1,13 @@
+# Exclude sensitive environment variables
+.env
+
+# Python caching and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
