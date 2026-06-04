@@ -29,6 +29,8 @@ class TestDeltaBot(unittest.TestCase):
         self.assertEqual(self.client.get_product_by_symbol("ethusd.p")["id"], 27)
         self.assertEqual(self.client.get_product_by_symbol("ETH/USD")["id"], 27)
         self.assertEqual(self.client.get_product_by_symbol("BTCUSD.PERP")["id"], 1)
+        self.assertEqual(self.client.get_product_by_symbol("DELTAIN:ETHUSD.P")["id"], 27)
+        self.assertEqual(self.client.get_product_by_symbol("DELTA:ETHUSD.P")["id"], 27)
 
     def test_signature_generation(self):
         """Verify headers and signature concatenation formatting."""

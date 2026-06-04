@@ -106,8 +106,8 @@ class DeltaClient:
 
     def get_product_by_symbol(self, symbol):
         """Normalizes symbol and retrieves the product specifications."""
-        # Replace .PERP first, then .P, to avoid partial replacement bugs
-        normalized_symbol = symbol.upper().replace(".PERP", "").replace(".P", "").replace("/", "")
+        # Replace .PERP first, then .P, and split by colon to strip exchange prefix (e.g. DELTAIN:)
+        normalized_symbol = symbol.upper().split(":")[-1].replace(".PERP", "").replace(".P", "").replace("/", "")
         products = self.get_products()
         
         # Try to find exact match
@@ -125,8 +125,8 @@ class DeltaClient:
 
     def get_ticker(self, symbol):
         """Fetches ticker details for a given symbol (public endpoint)."""
-        # Replace .PERP first, then .P, to avoid partial replacement bugs
-        normalized_symbol = symbol.upper().replace(".PERP", "").replace(".P", "").replace("/", "")
+        # Replace .PERP first, then .P, and split by colon to strip exchange prefix (e.g. DELTAIN:)
+        normalized_symbol = symbol.upper().split(":")[-1].replace(".PERP", "").replace(".P", "").replace("/", "")
         path = f"/v2/tickers/{normalized_symbol}"
         response = self._request("GET", path, is_private=False)
         if response.get("success"):
