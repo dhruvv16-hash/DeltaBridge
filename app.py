@@ -64,6 +64,7 @@ def health():
     """Health check endpoint to keep the bot awake (e.g. via UptimeRobot)."""
     return jsonify({"status": "healthy", "service": "delta-webhook-bot"}), 200
 
+@app.route("/", methods=["GET"])
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     """Serves the bot configuration panel dashboard."""
