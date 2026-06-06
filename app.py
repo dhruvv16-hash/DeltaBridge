@@ -46,8 +46,8 @@ def webhook():
 
         logger.info(f"Incoming webhook payload: {payload}")
 
-        # 1. Validate passphrase for security
-        passphrase = payload.get("passphrase")
+        # 1. Validate passphrase for security (check URL query param first, then JSON payload)
+        passphrase = request.args.get("passphrase") or payload.get("passphrase")
         if passphrase != Config.PASSPHRASE:
             logger.warning(f"Unauthorized access attempt with invalid passphrase: '{passphrase}'")
             return jsonify({"status": "error", "message": "Unauthorized"}), 401
@@ -105,13 +105,19 @@ def webhook():
             except (ValueError, TypeError):
                 raw_size = 0.0
 
-            if pos_side == "buy" or raw_size > 0:
-                close_side = "sell"
-            elif pos_side == "sell" or raw_size < 0:
-                close_side = "buy"
-            else:
-                # Fallback based on close action type
-                close_side = "sell" if action == "close_long" else "buy"
+            is_long = pos_side == "buy" or raw_size > 0
+            is_short = pos_side == "sell" or raw_size < 0
+
+            # Guard checks to ensure we only close the matching position side
+            if action == "close_long" and not is_long:
+                logger.warning(f"Received close_long alert but current position is not LONG (size: {raw_size}). Ignoring.")
+                return jsonify({"status": "success", "message": "Current position is not LONG, ignoring close_long"}), 200
+
+            if action == "close_short" and not is_short:
+                logger.warning(f"Received close_short alert but current position is not SHORT (size: {raw_size}). Ignoring.")
+                return jsonify({"status": "success", "message": "Current position is not SHORT, ignoring close_short"}), 200
+
+            close_side = "sell" if is_long else "buy"
 
             # Execute market order to close position (reduce_only=True)
             res = delta_client.place_order(
@@ -130,6 +136,36 @@ def webhook():
                 return jsonify({"status": "error", "message": "Delta API Order Placement Failed", "details": res}), 500
 
         # 5. Handle buy and sell entries with dynamic lot sizing
+        # First, check if there is an active opposing position. If so, close it first to release margin.
+        pos = delta_client.get_position(product_id)
+        if pos:
+            try:
+                pos_size = float(pos.get("size", 0))
+            except (ValueError, TypeError):
+                pos_size = 0.0
+
+            # Opposing conditions:
+            # - We get a 'buy' signal but we are currently 'short' (pos_size < 0)
+            # - We get a 'sell' signal but we are currently 'long' (pos_size > 0)
+            is_reversal = (action == "buy" and pos_size < 0) or (action == "sell" and pos_size > 0)
+            
+            if is_reversal and abs(pos_size) > 0:
+                logger.info(f"Reversal detected! Closing opposing position of size {abs(pos_size)} first to release margin...")
+                close_side = "buy" if action == "buy" else "sell"
+                close_res = delta_client.place_order(
+                    product_id=product_id,
+                    size=int(abs(pos_size)),
+                    side=close_side,
+                    order_type="market_order",
+                    reduce_only=True
+                )
+                if close_res.get("success"):
+                    import time
+                    logger.info("Opposing position successfully closed. Sleeping for 1.5 seconds for margin release...")
+                    time.sleep(1.5)
+                else:
+                    logger.error(f"Failed to close opposing position during reversal: {close_res}")
+
         # Fetch current mark price for sizing
         ticker_data = delta_client.get_ticker(symbol)
         if not ticker_data:

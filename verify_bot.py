@@ -80,5 +80,121 @@ class TestDeltaBot(unittest.TestCase):
         qty_lots_small = int(math.floor(buying_power_small / lot_value_usd)) # floor(9.0 / 19) = 0
         self.assertEqual(qty_lots_small, 0)
 
+class TestWebhookEndpoints(unittest.TestCase):
+    def setUp(self):
+        import os
+        os.environ["FLASK_ENV"] = "testing"
+        os.environ["PASSPHRASE"] = "test_passphrase"
+        os.environ["DEFAULT_LEVERAGE"] = "50"
+        os.environ["BALANCE_BUFFER_PCT"] = "95"
+        
+        # Import app and config inside setUp to use testing environment variables
+        from app import app, Config
+        # Reset Config parameters to ensure environment variables are picked up
+        Config.PASSPHRASE = "test_passphrase"
+        Config.DEFAULT_LEVERAGE = 50
+        Config.BALANCE_BUFFER_PCT = 0.95
+        
+        self.app = app.test_client()
+        
+    @patch('app.delta_client')
+    def test_webhook_unauthorized(self, mock_client):
+        # Test missing passphrase
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P"
+        })
+        self.assertEqual(response.status_code, 401)
+        
+        # Test invalid passphrase
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "wrong_passphrase"
+        })
+        self.assertEqual(response.status_code, 401)
+
+    @patch('app.delta_client')
+    def test_webhook_close_guards(self, mock_client):
+        # Setup mocks
+        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27}
+        
+        # Scenario 1: Receive close_long but position is SHORT (should ignore)
+        mock_client.get_position.return_value = {"product_id": 27, "size": "-10", "side": "sell"}
+        response = self.app.post('/webhook', json={
+            "action": "close_long",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Current position is not LONG, ignoring close_long", response.get_json()["message"])
+        mock_client.place_order.assert_not_called()
+        
+        # Scenario 2: Receive close_short but position is LONG (should ignore)
+        mock_client.get_position.return_value = {"product_id": 27, "size": "10", "side": "buy"}
+        mock_client.place_order.reset_mock()
+        response = self.app.post('/webhook', json={
+            "action": "close_short",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Current position is not SHORT, ignoring close_short", response.get_json()["message"])
+        mock_client.place_order.assert_not_called()
+
+        # Scenario 3: Receive close_long and position is LONG (should execute close)
+        mock_client.get_position.return_value = {"product_id": 27, "size": "10", "side": "buy"}
+        mock_client.place_order.reset_mock()
+        mock_client.place_order.return_value = {"success": True, "result": {"id": 12345}}
+        response = self.app.post('/webhook', json={
+            "action": "close_long",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        self.assertEqual(response.status_code, 200)
+        mock_client.place_order.assert_called_once_with(
+            product_id=27,
+            size=10,
+            side="sell",
+            order_type="market_order",
+            reduce_only=True
+        )
+
+    @patch('app.delta_client')
+    def test_webhook_reversal_buy(self, mock_client):
+        # Setup mocks
+        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+        mock_client.get_position.return_value = {"product_id": 27, "size": "-10", "side": "sell"} # Currently SHORT
+        mock_client.place_order.return_value = {"success": True, "result": {"id": 12345}}
+        mock_client.get_ticker.return_value = {"mark_price": "2000"}
+        mock_client.get_available_balance.return_value = (11.0, "USD")
+        
+        # Send buy webhook (which triggers reversal of the short position)
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify first order was the close order (reduce_only=True)
+        # Verify second order was the enter order
+        calls = mock_client.place_order.call_args_list
+        self.assertEqual(len(calls), 2)
+        
+        # Call 1: Close
+        self.assertEqual(calls[0][1]["side"], "buy")
+        self.assertEqual(calls[0][1]["size"], 10)
+        self.assertTrue(calls[0][1]["reduce_only"])
+        
+        # Call 2: Enter
+        # qty_lots = floor( (11.0 * 50 * 0.95) / (2000 * 0.01) ) = floor( 522.5 / 20 ) = 26 lots
+        self.assertEqual(calls[1][1]["side"], "buy")
+        self.assertEqual(calls[1][1]["size"], 26)
+        self.assertFalse(calls[1][1]["reduce_only"])
+
 if __name__ == "__main__":
     unittest.main()
+
+
