@@ -22,8 +22,8 @@ class Config:
     DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "50"))
     
     # Risk Management / Margin Buffer
-    # percentage of available balance to allocate per trade (e.g. 90 means 90%, leaving a 10% buffer for fees/slippage)
-    BALANCE_BUFFER_PCT = float(os.getenv("BALANCE_BUFFER_PCT", "90")) / 100.0
+    # percentage of available balance to allocate per trade (e.g. 55 means 55%, leaving a 45% buffer for fees/slippage)
+    BALANCE_BUFFER_PCT = float(os.getenv("BALANCE_BUFFER_PCT", "55")) / 100.0
 
     @classmethod
     def validate(cls):
