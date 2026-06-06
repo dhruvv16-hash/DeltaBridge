@@ -11,3 +11,6 @@ venv/
 ENV/
 env/
 .pytest_cache/
+instance/
+*.db
+
