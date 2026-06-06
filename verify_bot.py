@@ -309,6 +309,42 @@ class TestWebhookEndpoints(unittest.TestCase):
         self.assertIn(23, sizes)
         self.assertIn(5, sizes)
 
+    @patch('app.DeltaClient')
+    def test_webhook_fallback_when_db_empty(self, mock_client_class):
+        # 1. Delete the default account from DB
+        self.db.session.delete(self.default_account)
+        self.db.session.commit()
+        
+        # 2. Mock environment variables on Config
+        with patch('config.Config.API_KEY', 'env_fallback_key'), \
+             patch('config.Config.API_SECRET', 'env_fallback_secret'):
+            
+            mock_client = mock_client_class.return_value
+            mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+            mock_client.get_position.return_value = None
+            mock_client.get_ticker.return_value = {"mark_price": "2000"}
+            mock_client.get_available_balance.return_value = (10.0, "USD")
+            mock_client.place_order.return_value = {"success": True, "result": {"id": 888}}
+            
+            response = self.app.post('/webhook', json={
+                "action": "buy",
+                "ticker": "ETHUSD.P",
+                "passphrase": "test_passphrase"
+            })
+            
+            self.assertEqual(response.status_code, 200)
+            results = response.get_json()["results"]
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["name"], "Environment Default")
+            self.assertTrue(results[0]["success"])
+            
+            # Verify constructor of DeltaClient was called with the environment credentials
+            mock_client_class.assert_called_with(
+                api_key='env_fallback_key',
+                api_secret='env_fallback_secret',
+                base_url=Config.BASE_URL
+            )
+
 if __name__ == "__main__":
     unittest.main()
 

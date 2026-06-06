@@ -206,8 +206,22 @@ def webhook():
         # 4. Fetch all active accounts from the database
         active_accounts = Account.query.filter_by(is_active=True).all()
         if not active_accounts:
-            logger.warning("No active accounts configured in database. Skipping webhook execution.")
-            return jsonify({"status": "success", "message": "No active accounts configured"}), 200
+            # Check if environment-based API keys are configured as fallback
+            if Config.API_KEY and Config.API_SECRET:
+                logger.info("No active accounts configured in database. Falling back to environment API credentials.")
+                fallback_account = Account(
+                    id=0,
+                    name="Environment Default",
+                    api_key=Config.API_KEY,
+                    api_secret=Config.API_SECRET,
+                    leverage=Config.DEFAULT_LEVERAGE,
+                    balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                    is_active=True
+                )
+                active_accounts = [fallback_account]
+            else:
+                logger.warning("No active accounts configured in database and no environment fallback API keys found. Skipping webhook execution.")
+                return jsonify({"status": "success", "message": "No active accounts configured"}), 200
 
         results = []
         
