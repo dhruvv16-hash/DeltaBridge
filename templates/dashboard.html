@@ -690,6 +690,7 @@
                 accounts.forEach(acc => {
                     const row = document.createElement('div');
                     row.className = 'account-row';
+                    row.id = `row-${acc.id}`;
                     row.innerHTML = `
                         <div class="account-info">
                             <div class="account-name">${acc.name}</div>
@@ -702,6 +703,7 @@
                         <div class="account-actions">
                             <span class="balance-badge" id="balance-${acc.id}">Balance: --</span>
                             <button class="btn btn-secondary btn-sm" onclick="checkBalance(${acc.id})">Check Balance</button>
+                            <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct})">Edit</button>
                             <label class="switch">
                                 <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
                                 <span class="slider"></span>
@@ -844,6 +846,83 @@
                 badge.innerText = 'Error';
                 showToast("Network error occurred", false);
             }
+        }
+
+        // Inline Account Editing functions
+        function editAccount(id, name, leverage, buffer) {
+            const row = document.getElementById(`row-${id}`);
+            if (!row) return;
+            
+            row.dataset.originalHtml = row.innerHTML;
+            
+            row.innerHTML = `
+                <div class="account-info" style="width: 100%;">
+                    <div style="display: flex; gap: 1rem; align-items: center; width: 100%; flex-wrap: wrap; margin-bottom: 1rem;">
+                        <div class="form-group" style="flex: 1; min-width: 150px;">
+                            <label style="font-size: 0.75rem;">Friendly Name</label>
+                            <input type="text" id="edit-name-${id}" value="${name}" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="width: 80px;">
+                            <label style="font-size: 0.75rem;">Leverage</label>
+                            <input type="number" id="edit-leverage-${id}" value="${leverage}" min="1" max="100" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="width: 100px;">
+                            <label style="font-size: 0.75rem;">Trade Size %</label>
+                            <input type="number" id="edit-buffer-${id}" value="${buffer}" min="1" max="100" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="flex: 2; min-width: 180px;">
+                            <label style="font-size: 0.75rem;">API Key</label>
+                            <input type="text" id="edit-api-key-${id}" placeholder="Leave blank to keep current" style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="flex: 2; min-width: 180px;">
+                            <label style="font-size: 0.75rem;">API Secret</label>
+                            <input type="password" id="edit-api-secret-${id}" placeholder="Leave blank to keep current" style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; justify-content: flex-end; width: 100%;">
+                        <button class="btn btn-primary btn-sm" onclick="saveAccountEdit(${id})">Save</button>
+                        <button class="btn btn-secondary btn-sm" onclick="cancelAccountEdit(${id})">Cancel</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function saveAccountEdit(id) {
+            const name = document.getElementById(`edit-name-${id}`).value;
+            const leverage = parseInt(document.getElementById(`edit-leverage-${id}`).value);
+            const balance_buffer_pct = parseFloat(document.getElementById(`edit-buffer-${id}`).value);
+            const api_key = document.getElementById(`edit-api-key-${id}`).value;
+            const api_secret = document.getElementById(`edit-api-secret-${id}`).value;
+            
+            const payload = {
+                name,
+                leverage,
+                balance_buffer_pct
+            };
+            if (api_key) payload.api_key = api_key;
+            if (api_secret) payload.api_secret = api_secret;
+            
+            try {
+                const response = await fetch(`/api/accounts/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    showToast("Account updated successfully!");
+                    fetchAccounts();
+                } else {
+                    const data = await response.json();
+                    showToast(data.message || "Failed to update account", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+        
+        function cancelAccountEdit(id) {
+            fetchAccounts();
         }
 
         // Fetch Trade Logs

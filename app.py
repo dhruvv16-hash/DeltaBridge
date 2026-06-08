@@ -439,6 +439,17 @@ def update_account(id):
     data = request.get_json(silent=True) or {}
     if "is_active" in data:
         acc.is_active = bool(data["is_active"])
+    if "name" in data:
+        acc.name = data["name"]
+    if "leverage" in data:
+        acc.leverage = int(data["leverage"])
+    if "balance_buffer_pct" in data:
+        acc.balance_buffer_pct = float(data["balance_buffer_pct"])
+    if "api_key" in data:
+        acc.api_key = data["api_key"]
+    if "api_secret" in data and data["api_secret"]:
+        acc.api_secret = data["api_secret"]
+        
     db.session.commit()
     return jsonify({"status": "success", "account": acc.to_dict()})
 
