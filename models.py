@@ -11,6 +11,8 @@ class Account(db.Model):
     api_secret = db.Column(db.String(255), nullable=False)
     leverage = db.Column(db.Integer, default=50, nullable=False)
     balance_buffer_pct = db.Column(db.Float, default=55.0, nullable=False)
+    sizing_type = db.Column(db.String(20), default="percentage", nullable=False) # "percentage" or "fixed"
+    fixed_amount = db.Column(db.Float, default=10.0, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     
     def to_dict(self):
@@ -21,6 +23,8 @@ class Account(db.Model):
             "api_secret": self.api_secret[:6] + "..." if self.api_secret else "",
             "leverage": self.leverage,
             "balance_buffer_pct": self.balance_buffer_pct,
+            "sizing_type": self.sizing_type,
+            "fixed_amount": self.fixed_amount,
             "is_active": self.is_active
         }
 

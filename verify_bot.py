@@ -425,5 +425,267 @@ class TestWebhookEndpoints(unittest.TestCase):
         mock_client.get_position.return_value = None
         self.assertTrue(check_position_matches_action(account_data, "ETHUSD.P", "close_long"))
 
+class TestPnLTracking(unittest.TestCase):
+    def setUp(self):
+        import os
+        os.environ["FLASK_ENV"] = "testing"
+        os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+        os.environ["PASSPHRASE"] = "test_passphrase"
+        
+        from app import app, db, Account
+        app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+        
+        self.app_context = app.app_context()
+        self.app_context.push()
+        
+        db.session.rollback()
+        db.session.close()
+        db.session.expunge_all()
+        db.create_all()
+        
+        # Add a test active account
+        self.account = Account(
+            name="PnL Test Account",
+            api_key="pnl_key",
+            api_secret="pnl_secret",
+            leverage=10,
+            balance_buffer_pct=50.0,
+            is_active=True
+        )
+        db.session.add(self.account)
+        db.session.commit()
+        
+        self.app = app.test_client()
+        self.db = db
+
+    def tearDown(self):
+        self.db.session.rollback()
+        self.db.session.close()
+        self.db.session.expunge_all()
+        self.db.drop_all()
+        self.app_context.pop()
+
+    @patch('delta_client.requests.get')
+    def test_delta_client_positions(self, mock_get):
+        """Test DeltaClient methods get_open_positions and get_closed_positions."""
+        client = DeltaClient(api_key="key", api_secret="secret", base_url="https://api.delta.exchange")
+        
+        # 1. Mock Open Positions response
+        mock_open_response = MagicMock()
+        mock_open_response.ok = True
+        mock_open_response.json.return_value = {
+            "success": True,
+            "result": [
+                {"product_id": 27, "size": "10", "side": "buy", "unrealized_pnl": "5.5"}
+            ]
+        }
+        mock_get.return_value = mock_open_response
+        
+        open_pos = client.get_open_positions()
+        self.assertEqual(len(open_pos), 1)
+        self.assertEqual(open_pos[0]["product_id"], 27)
+        self.assertEqual(open_pos[0]["unrealized_pnl"], "5.5")
+        
+        # 2. Mock Closed Positions response
+        mock_closed_response = MagicMock()
+        mock_closed_response.ok = True
+        mock_closed_response.json.return_value = {
+            "success": True,
+            "result": [
+                {"product_id": 27, "closed_size": "10", "side": "sell", "realized_pnl": "-2.5", "closed_at": "1700000000000"}
+            ]
+        }
+        mock_get.return_value = mock_closed_response
+        
+        closed_pos = client.get_closed_positions(limit=50)
+        self.assertEqual(len(closed_pos), 1)
+        self.assertEqual(closed_pos[0]["product_id"], 27)
+        self.assertEqual(closed_pos[0]["realized_pnl"], "-2.5")
+
+    @patch('app.DeltaClient')
+    @patch('app.public_delta_client')
+    def test_api_pnl_route(self, mock_public_client, mock_client_class):
+        """Test that the /api/pnl endpoint aggregates and normalizes positions."""
+        # Mock public product list
+        mock_public_client.get_products.return_value = [
+            {"id": 27, "symbol": "ETHUSD"}
+        ]
+        
+        # Mock private client instance
+        mock_private_client = mock_client_class.return_value
+        
+        # Mock open positions return
+        mock_private_client.get_open_positions.return_value = [
+            {
+                "product_id": 27,
+                "size": "10",
+                "side": "buy",
+                "entry_price": "1850",
+                "mark_price": "1860",
+                "unrealized_pnl": "10",
+                "margin": "2",
+                "leverage": "10"
+            }
+        ]
+        
+        # Mock closed positions return
+        mock_private_client.get_closed_positions.return_value = [
+            {
+                "product_id": 27,
+                "closed_size": "5",
+                "side": "sell",
+                "entry_price": "1850",
+                "close_price": "1840",
+                "realized_pnl": "-50",
+                "closed_at": "1700000000"
+            }
+        ]
+        
+        response = self.app.get('/api/pnl')
+        self.assertEqual(response.status_code, 200)
+        
+        data = response.get_json()
+        self.assertIn("open", data)
+        self.assertIn("closed", data)
+        
+        # Verify open position normalization
+        open_list = data["open"]
+        self.assertEqual(len(open_list), 1)
+        self.assertEqual(open_list[0]["account_name"], "PnL Test Account")
+        self.assertEqual(open_list[0]["symbol"], "ETHUSD")
+        self.assertEqual(open_list[0]["side"], "LONG")
+        self.assertEqual(open_list[0]["size"], 10.0)
+        self.assertEqual(open_list[0]["unrealized_pnl"], 10.0)
+        
+        # Verify closed trade history normalization
+        closed_list = data["closed"]
+        self.assertEqual(len(closed_list), 1)
+        self.assertEqual(closed_list[0]["account_name"], "PnL Test Account")
+        self.assertEqual(closed_list[0]["symbol"], "ETHUSD")
+        self.assertEqual(closed_list[0]["side"], "SHORT")
+        self.assertEqual(closed_list[0]["closed_size"], 5.0)
+        self.assertEqual(closed_list[0]["realized_pnl"], -50.0)
+
+class TestSizingModels(unittest.TestCase):
+    def setUp(self):
+        import os
+        os.environ["FLASK_ENV"] = "testing"
+        os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+        os.environ["PASSPHRASE"] = "test_passphrase"
+        
+        from app import app, db, Account, GlobalSetting
+        app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+        
+        self.app_context = app.app_context()
+        self.app_context.push()
+        
+        db.session.rollback()
+        db.session.close()
+        db.session.expunge_all()
+        db.create_all()
+        
+        db.session.add(GlobalSetting(key="passphrase", value="test_passphrase"))
+        db.session.commit()
+        
+        self.app = app.test_client()
+        self.db = db
+        self.Account = Account
+
+        # Mock public symbol lookup
+        from app import public_delta_client
+        public_delta_client.get_product_by_symbol = MagicMock(
+            return_value={"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+        )
+
+    def tearDown(self):
+        self.db.session.rollback()
+        self.db.session.close()
+        self.db.session.expunge_all()
+        self.db.drop_all()
+        self.app_context.pop()
+
+    @patch('app.DeltaClient')
+    def test_fixed_margin_sizing_success(self, mock_client_class):
+        """Verify that sizing_type='fixed' computes quantity using fixed margin rather than percentage."""
+        # 1. Create account with fixed sizing
+        acc = self.Account(
+            name="Fixed Account Success",
+            api_key="key_fixed",
+            api_secret="secret_fixed",
+            leverage=50,
+            sizing_type="fixed",
+            fixed_amount=8.0, # Commit exactly $8.00 of margin
+            is_active=True
+        )
+        self.db.session.add(acc)
+        self.db.session.commit()
+
+        # 2. Setup mock client response
+        mock_client = mock_client_class.return_value
+        mock_client.get_position.return_value = None
+        mock_client.get_ticker.return_value = {"mark_price": "2000"}
+        mock_client.get_available_balance.return_value = (10.0, "USD") # Available balance is $10.00
+        mock_client.place_order.return_value = {"success": True, "result": {"id": 111}}
+        
+        # 3. Post webhook
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        
+        self.assertEqual(response.status_code, 200)
+        results = response.get_json()["results"]
+        self.assertTrue(results[0]["success"])
+        
+        # Sizing math:
+        # Buying power = fixed_amount * leverage = 8.0 * 50 = 400 USD
+        # Lot value = 2000 * 0.01 = 20 USD
+        # Qty = floor(400 / 20) = 20 lots
+        mock_client.place_order.assert_called_once_with(
+            product_id=27,
+            size=20,
+            side="buy",
+            order_type="market_order",
+            reduce_only=False
+        )
+
+    @patch('app.DeltaClient')
+    def test_fixed_margin_sizing_insufficient_balance(self, mock_client_class):
+        """Verify that if fixed margin amount exceeds available balance, the trade is aborted."""
+        # 1. Create account with fixed sizing where fixed_amount is greater than balance
+        acc = self.Account(
+            name="Fixed Account Insufficient",
+            api_key="key_fixed2",
+            api_secret="secret_fixed2",
+            leverage=50,
+            sizing_type="fixed",
+            fixed_amount=15.0, # Requires $15.00 margin
+            is_active=True
+        )
+        self.db.session.add(acc)
+        self.db.session.commit()
+
+        # 2. Setup mock client response
+        mock_client = mock_client_class.return_value
+        mock_client.get_position.return_value = None
+        mock_client.get_ticker.return_value = {"mark_price": "2000"}
+        mock_client.get_available_balance.return_value = (10.0, "USD") # Only has $10.00
+        
+        # 3. Post webhook
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        
+        self.assertEqual(response.status_code, 200)
+        results = response.get_json()["results"]
+        self.assertFalse(results[0]["success"])
+        self.assertIn("Insufficient balance (need 15.0 USD, have 10.0 USD)", results[0]["message"])
+        
+        # Assert order was NOT placed
+        mock_client.place_order.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

@@ -197,7 +197,9 @@ def email_polling_loop():
                         "api_key": account.api_key,
                         "api_secret": account.api_secret,
                         "leverage": account.leverage,
-                        "balance_buffer_pct": account.balance_buffer_pct
+                        "balance_buffer_pct": account.balance_buffer_pct,
+                        "sizing_type": account.sizing_type,
+                        "fixed_amount": account.fixed_amount
                     })
                     
                 if not accounts_data and Config.API_KEY and Config.API_SECRET:
@@ -330,6 +332,172 @@ def get_logs():
     logs = TradeLog.query.order_by(TradeLog.timestamp.desc()).limit(100).all()
     return jsonify([log.to_dict() for log in logs])
 
+@app.route("/api/pnl", methods=["GET"])
+def get_pnl():
+    """Aggregates live open positions and closed trade history across all active accounts."""
+    import datetime
+    try:
+        # Fetch active accounts
+        active_accounts = Account.query.filter_by(is_active=True).all()
+        if not active_accounts:
+            if Config.API_KEY and Config.API_SECRET:
+                fallback_account = Account(
+                    id=0,
+                    name="Environment Default",
+                    api_key=Config.API_KEY,
+                    api_secret=Config.API_SECRET,
+                    leverage=Config.DEFAULT_LEVERAGE,
+                    balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                    sizing_type="percentage",
+                    fixed_amount=10.0,
+                    is_active=True
+                )
+                active_accounts = [fallback_account]
+                
+        # Fetch and map products for symbol translation
+        products = []
+        try:
+            products = public_delta_client.get_products()
+        except Exception as e:
+            logger.warning(f"Failed to fetch products for symbol translation in /api/pnl: {e}")
+            
+        product_map = {p.get("id"): p for p in products if p.get("id")}
+        
+        open_positions = []
+        closed_positions = []
+        
+        for account in active_accounts:
+            # Open Positions
+            try:
+                client = DeltaClient(
+                    api_key=account.api_key,
+                    api_secret=account.api_secret,
+                    base_url=Config.BASE_URL
+                )
+                positions = client.get_open_positions()
+                for pos in positions:
+                    size_val = float(pos.get("size") or 0)
+                    if size_val == 0:
+                        continue
+                        
+                    product_id = pos.get("product_id")
+                    prod_info = product_map.get(product_id) or pos.get("product") or {}
+                    symbol = prod_info.get("symbol") or f"ID:{product_id}"
+                    
+                    side_raw = pos.get("side", "").lower()
+                    if side_raw in ["buy", "long"]:
+                        side = "LONG"
+                    elif side_raw in ["sell", "short"]:
+                        side = "SHORT"
+                    else:
+                        side = "LONG" if size_val > 0 else "SHORT"
+                        
+                    upnl = pos.get("unrealized_pnl")
+                    if upnl is None:
+                        upnl = pos.get("upnl")
+                    if upnl is None:
+                        upnl = pos.get("pnl")
+                    if upnl is None:
+                        upnl = 0.0
+                        
+                    open_positions.append({
+                        "account_name": account.name,
+                        "product_id": product_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "size": abs(size_val),
+                        "entry_price": float(pos.get("entry_price") or pos.get("avg_entry_price") or 0),
+                        "mark_price": float(pos.get("mark_price") or 0),
+                        "unrealized_pnl": float(upnl),
+                        "margin": float(pos.get("margin") or 0),
+                        "leverage": pos.get("leverage") or account.leverage
+                    })
+            except Exception as e:
+                logger.exception(f"Error fetching open positions for account {account.name}: {e}")
+                
+            # Closed Positions
+            try:
+                client = DeltaClient(
+                    api_key=account.api_key,
+                    api_secret=account.api_secret,
+                    base_url=Config.BASE_URL
+                )
+                closed = client.get_closed_positions(limit=50)
+                for pos in closed:
+                    product_id = pos.get("product_id")
+                    prod_info = product_map.get(product_id) or pos.get("product") or {}
+                    symbol = prod_info.get("symbol") or f"ID:{product_id}"
+                    
+                    side_raw = pos.get("side", "").lower()
+                    if side_raw in ["buy", "long"]:
+                        side = "LONG"
+                    elif side_raw in ["sell", "short"]:
+                        side = "SHORT"
+                    else:
+                        side = "LONG"
+                        
+                    closed_size = pos.get("closed_size")
+                    if closed_size is None:
+                        closed_size = pos.get("size")
+                    if closed_size is None:
+                        closed_size = 0.0
+                        
+                    rpnl = pos.get("realized_pnl")
+                    if rpnl is None:
+                        rpnl = pos.get("rpnl")
+                    if rpnl is None:
+                        rpnl = pos.get("pnl")
+                    if rpnl is None:
+                        rpnl = 0.0
+                        
+                    closed_at = pos.get("closed_at")
+                    closed_at_str = ""
+                    closed_at_raw = 0
+                    if closed_at:
+                        try:
+                            t_val = float(closed_at)
+                            if t_val > 1e12:
+                                t_val = t_val / 1000.0
+                            if t_val > 1e11:
+                                t_val = t_val / 1000.0
+                            closed_at_raw = t_val
+                            
+                            dt = datetime.datetime.fromtimestamp(t_val, datetime.timezone.utc)
+                            closed_at_str = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                        except Exception:
+                            closed_at_str = str(closed_at)
+                            
+                    closed_positions.append({
+                        "account_name": account.name,
+                        "product_id": product_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "closed_size": abs(float(closed_size)),
+                        "entry_price": float(pos.get("entry_price") or pos.get("avg_entry_price") or 0),
+                        "close_price": float(pos.get("close_price") or pos.get("exit_price") or pos.get("avg_exit_price") or 0),
+                        "realized_pnl": float(rpnl),
+                        "closed_at": closed_at_str,
+                        "closed_at_raw": closed_at_raw
+                    })
+            except Exception as e:
+                logger.exception(f"Error fetching closed positions for account {account.name}: {e}")
+                
+        # Sort closed positions by timestamp descending
+        closed_positions.sort(key=lambda x: x.get("closed_at_raw", 0), reverse=True)
+        
+        # Remove closed_at_raw from response payload
+        for item in closed_positions:
+            item.pop("closed_at_raw", None)
+            
+        return jsonify({
+            "open": open_positions,
+            "closed": closed_positions
+        })
+    except Exception as e:
+        logger.exception(f"Error in /api/pnl endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/api/email-settings", methods=["GET"])
 def get_email_settings():
     def get_setting(key, default=""):
@@ -417,6 +585,8 @@ def add_account():
     api_secret = data.get("api_secret")
     leverage = data.get("leverage", 50)
     balance_buffer_pct = data.get("balance_buffer_pct", 55.0)
+    sizing_type = data.get("sizing_type", "percentage")
+    fixed_amount = data.get("fixed_amount", 10.0)
     
     if not name or not api_key or not api_secret:
         return jsonify({"status": "error", "message": "Name, API Key, and API Secret are required"}), 400
@@ -427,6 +597,8 @@ def add_account():
         api_secret=api_secret,
         leverage=int(leverage),
         balance_buffer_pct=float(balance_buffer_pct),
+        sizing_type=sizing_type,
+        fixed_amount=float(fixed_amount),
         is_active=True
     )
     db.session.add(acc)
@@ -449,6 +621,10 @@ def update_account(id):
         acc.api_key = data["api_key"]
     if "api_secret" in data and data["api_secret"]:
         acc.api_secret = data["api_secret"]
+    if "sizing_type" in data:
+        acc.sizing_type = data["sizing_type"]
+    if "fixed_amount" in data:
+        acc.fixed_amount = float(data["fixed_amount"])
         
     db.session.commit()
     return jsonify({"status": "success", "account": acc.to_dict()})
@@ -636,7 +812,23 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook"):
                         continue
 
                     # Calculate max lots based on account settings
-                    buying_power = balance * acc["leverage"] * (acc["balance_buffer_pct"] / 100.0)
+                    sizing_type = acc.get("sizing_type") or "percentage"
+                    fixed_amount_val = acc.get("fixed_amount")
+                    fixed_amount = float(fixed_amount_val) if fixed_amount_val is not None else 10.0
+                    
+                    if sizing_type == "fixed":
+                        if fixed_amount > balance:
+                            logger.warning(f"Insufficient balance on account '{acc_name}': Fixed Margin of {fixed_amount} {asset} exceeds balance {balance} {asset}.")
+                            account_result.update({"success": False, "message": f"Insufficient balance (need {fixed_amount} {asset}, have {balance} {asset})"})
+                            results.append(account_result)
+                            continue
+                        buying_power = fixed_amount * acc["leverage"]
+                        sizing_desc = f"Fixed Margin = {fixed_amount} {asset}"
+                    else:
+                        buffer_pct = float(acc.get("balance_buffer_pct", 55.0))
+                        buying_power = balance * acc["leverage"] * (buffer_pct / 100.0)
+                        sizing_desc = f"Buffer = {buffer_pct}%"
+                        
                     lot_value_usd = price * contract_value
                     
                     if lot_value_usd <= 0:
@@ -648,7 +840,7 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook"):
                     qty_lots = int(math.floor(buying_power / lot_value_usd))
                     
                     logger.info(f"Dynamic Sizing details for account '{acc_name}': Balance = {balance} {asset}, Leverage = {acc['leverage']}x, "
-                                f"Buffer = {acc['balance_buffer_pct']}%, Lot USD Value = {lot_value_usd:.4f}, Calculated Qty = {qty_lots} Lots")
+                                f"{sizing_desc}, Lot USD Value = {lot_value_usd:.4f}, Calculated Qty = {qty_lots} Lots")
 
                     if qty_lots <= 0:
                         logger.warning(f"Insufficient balance ({balance} {asset}) for leverage {acc['leverage']}x to open even 1 lot on account '{acc_name}'.")
@@ -802,6 +994,8 @@ def webhook():
                     api_secret=Config.API_SECRET,
                     leverage=Config.DEFAULT_LEVERAGE,
                     balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                    sizing_type="percentage",
+                    fixed_amount=10.0,
                     is_active=True
                 )
                 active_accounts = [fallback_account]
@@ -827,7 +1021,9 @@ def webhook():
                 "api_key": account.api_key,
                 "api_secret": account.api_secret,
                 "leverage": account.leverage,
-                "balance_buffer_pct": account.balance_buffer_pct
+                "balance_buffer_pct": account.balance_buffer_pct,
+                "sizing_type": account.sizing_type,
+                "fixed_amount": account.fixed_amount
             })
 
         # 5. Launch background thread for trade execution
@@ -865,10 +1061,35 @@ def webhook():
             logger.error(f"Failed to save error log to DB: {db_e}")
         return jsonify({"status": "error", "message": "Internal Server Error", "exception": str(e)}), 500
 
+def run_migrations():
+    from sqlalchemy import text
+    try:
+        # 1. Add sizing_type
+        try:
+            db.session.execute(text("ALTER TABLE accounts ADD COLUMN sizing_type VARCHAR(20) DEFAULT 'percentage' NOT NULL"))
+            db.session.commit()
+            logger.info("Database migration: added sizing_type column to accounts table.")
+        except Exception as e:
+            db.session.rollback()
+            logger.debug(f"sizing_type migration status: {e}")
+            
+        # 2. Add fixed_amount
+        try:
+            db.session.execute(text("ALTER TABLE accounts ADD COLUMN fixed_amount FLOAT DEFAULT 10.0 NOT NULL"))
+            db.session.commit()
+            logger.info("Database migration: added fixed_amount column to accounts table.")
+        except Exception as e:
+            db.session.rollback()
+            logger.debug(f"fixed_amount migration status: {e}")
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+
 # Initialize database tables on startup (unless running tests)
 if os.getenv("FLASK_ENV") != "testing":
     with app.app_context():
         db.create_all()
+        # Run database migrations for any new columns
+        run_migrations()
         # Initialize default passphrase in database if not present
         passphrase_setting = GlobalSetting.query.filter_by(key="passphrase").first()
         if not passphrase_setting:

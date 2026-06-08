@@ -472,6 +472,7 @@
         </div>
         <ul class="nav-links">
             <li class="active" data-tab="accounts-tab"><a href="#accounts">Accounts</a></li>
+            <li data-tab="pnl-tab"><a href="#pnl">Trades & PnL</a></li>
             <li data-tab="logs-tab"><a href="#logs">Trade Logs</a></li>
             <li data-tab="email-tab"><a href="#email">Email Verification</a></li>
             <li data-tab="settings-tab"><a href="#settings">Global Settings</a></li>
@@ -510,8 +511,19 @@
                             <input type="number" id="leverage" value="50" min="1" max="100" required>
                         </div>
                         <div class="form-group">
+                            <label for="sizing-type">Sizing Mode</label>
+                            <select id="sizing-type" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.9rem; outline: none; transition: var(--transition);">
+                                <option value="percentage">Percentage of Balance</option>
+                                <option value="fixed">Fixed Margin per Trade</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="buffer-group">
                             <label for="buffer">Trade Amount Allocation %</label>
                             <input type="number" id="buffer" value="55" min="1" max="100" required>
+                        </div>
+                        <div class="form-group" id="fixed-amount-group" style="display: none;">
+                            <label for="fixed-amount">Fixed Margin Amount (USDT/USDC)</label>
+                            <input type="number" id="fixed-amount" value="10" min="0.001" step="any" required>
                         </div>
                         <div class="form-group" style="justify-content: flex-end; padding-top: 1.5rem;">
                             <button type="submit" class="btn btn-primary">Add Account</button>
@@ -630,6 +642,63 @@
                 </div>
             </div>
         </section>
+
+        <!-- TRADES & PNL TAB PANEL -->
+        <section id="pnl-tab" class="tab-panel">
+            <!-- Open Positions Card -->
+            <div class="card" style="margin-bottom: 2rem;">
+                <div class="card-title">
+                    <span>Live Open Positions</span>
+                    <button class="btn btn-secondary btn-sm" onclick="fetchPnL()">Refresh Positions</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--border-color); color: var(--text-secondary); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">
+                                <th style="padding: 1rem;">Account</th>
+                                <th style="padding: 1rem;">Ticker</th>
+                                <th style="padding: 1rem;">Side</th>
+                                <th style="padding: 1rem;">Size</th>
+                                <th style="padding: 1rem;">Entry Price</th>
+                                <th style="padding: 1rem;">Mark Price</th>
+                                <th style="padding: 1rem;">Margin</th>
+                                <th style="padding: 1rem;">Leverage</th>
+                                <th style="padding: 1rem;">Unrealized PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="open-positions-list">
+                            <tr style="color: var(--text-secondary);"><td colspan="9" style="padding: 2rem; text-align: center;">Loading open positions...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Closed Trades Card -->
+            <div class="card">
+                <div class="card-title">
+                    <span>Closed Position History</span>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--border-color); color: var(--text-secondary); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">
+                                <th style="padding: 1rem;">Closed Time</th>
+                                <th style="padding: 1rem;">Account</th>
+                                <th style="padding: 1rem;">Ticker</th>
+                                <th style="padding: 1rem;">Side</th>
+                                <th style="padding: 1rem;">Closed Size</th>
+                                <th style="padding: 1rem;">Entry Price</th>
+                                <th style="padding: 1rem;">Exit Price</th>
+                                <th style="padding: 1rem;">Realized PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="closed-positions-list">
+                            <tr style="color: var(--text-secondary);"><td colspan="8" style="padding: 2rem; text-align: center;">Loading closed position history...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
     </main>
 
     <!-- Toast Notification system -->
@@ -652,6 +721,14 @@
                 
                 // Update title
                 document.getElementById('page-title').innerText = this.innerText;
+                
+                if (tabId === 'pnl-tab') {
+                    fetchPnL();
+                } else if (tabId === 'logs-tab') {
+                    fetchLogs();
+                } else if (tabId === 'accounts-tab') {
+                    fetchAccounts();
+                }
             });
         });
 
@@ -691,19 +768,23 @@
                     const row = document.createElement('div');
                     row.className = 'account-row';
                     row.id = `row-${acc.id}`;
+                    
+                    const sizingLabel = acc.sizing_type === 'fixed' ? 'Fixed Margin' : 'Allocation';
+                    const sizingValue = acc.sizing_type === 'fixed' ? `$${acc.fixed_amount.toFixed(2)}` : `${acc.balance_buffer_pct}%`;
+                    
                     row.innerHTML = `
                         <div class="account-info">
                             <div class="account-name">${acc.name}</div>
                             <div class="account-details">
                                 <span>API Key: <b>${acc.api_key}</b></span>
                                 <span>Leverage: <b>${acc.leverage}x</b></span>
-                                <span>Trade Size: <b>${acc.balance_buffer_pct}%</b></span>
+                                <span>Trade Size: <b>${sizingValue} (${sizingLabel})</b></span>
                             </div>
                         </div>
                         <div class="account-actions">
                             <span class="balance-badge" id="balance-${acc.id}">Balance: --</span>
                             <button class="btn btn-secondary btn-sm" onclick="checkBalance(${acc.id})">Check Balance</button>
-                            <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct})">Edit</button>
+                            <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct}, '${acc.sizing_type}', ${acc.fixed_amount})">Edit</button>
                             <label class="switch">
                                 <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
                                 <span class="slider"></span>
@@ -733,6 +814,12 @@
         }
 
         // Add account submit
+        document.getElementById('sizing-type').addEventListener('change', function() {
+            const isFixed = this.value === 'fixed';
+            document.getElementById('buffer-group').style.display = isFixed ? 'none' : 'block';
+            document.getElementById('fixed-amount-group').style.display = isFixed ? 'block' : 'none';
+        });
+
         document.getElementById('add-account-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -741,7 +828,9 @@
                 api_key: document.getElementById('api-key').value,
                 api_secret: document.getElementById('api-secret').value,
                 leverage: parseInt(document.getElementById('leverage').value),
-                balance_buffer_pct: parseFloat(document.getElementById('buffer').value)
+                balance_buffer_pct: parseFloat(document.getElementById('buffer').value),
+                sizing_type: document.getElementById('sizing-type').value,
+                fixed_amount: parseFloat(document.getElementById('fixed-amount').value)
             };
             
             try {
@@ -756,6 +845,10 @@
                     document.getElementById('add-account-form').reset();
                     document.getElementById('leverage').value = "50";
                     document.getElementById('buffer').value = "55";
+                    document.getElementById('sizing-type').value = "percentage";
+                    document.getElementById('fixed-amount').value = "10";
+                    document.getElementById('buffer-group').style.display = 'block';
+                    document.getElementById('fixed-amount-group').style.display = 'none';
                     fetchAccounts();
                 } else {
                     const data = await response.json();
@@ -849,16 +942,24 @@
         }
 
         // Inline Account Editing functions
-        function editAccount(id, name, leverage, buffer) {
+        function toggleEditSizing(id, value) {
+            const isFixed = value === 'fixed';
+            document.getElementById(`edit-buffer-group-${id}`).style.display = isFixed ? 'none' : 'block';
+            document.getElementById(`edit-fixed-group-${id}`).style.display = isFixed ? 'block' : 'none';
+        }
+
+        function editAccount(id, name, leverage, buffer, sizing_type = 'percentage', fixed_amount = 10.0) {
             const row = document.getElementById(`row-${id}`);
             if (!row) return;
             
             row.dataset.originalHtml = row.innerHTML;
             
+            const isFixed = sizing_type === 'fixed';
+            
             row.innerHTML = `
                 <div class="account-info" style="width: 100%;">
                     <div style="display: flex; gap: 1rem; align-items: center; width: 100%; flex-wrap: wrap; margin-bottom: 1rem;">
-                        <div class="form-group" style="flex: 1; min-width: 150px;">
+                        <div class="form-group" style="flex: 1; min-width: 120px;">
                             <label style="font-size: 0.75rem;">Friendly Name</label>
                             <input type="text" id="edit-name-${id}" value="${name}" required style="padding: 0.4rem; font-size: 0.9rem;">
                         </div>
@@ -866,9 +967,20 @@
                             <label style="font-size: 0.75rem;">Leverage</label>
                             <input type="number" id="edit-leverage-${id}" value="${leverage}" min="1" max="100" required style="padding: 0.4rem; font-size: 0.9rem;">
                         </div>
-                        <div class="form-group" style="width: 100px;">
-                            <label style="font-size: 0.75rem;">Trade Size %</label>
+                        <div class="form-group" style="width: 120px;">
+                            <label style="font-size: 0.75rem;">Sizing Mode</label>
+                            <select id="edit-sizing-type-${id}" style="padding: 0.4rem; font-size: 0.9rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;" onchange="toggleEditSizing(${id}, this.value)">
+                                <option value="percentage" ${sizing_type === 'percentage' ? 'selected' : ''}>Percentage</option>
+                                <option value="fixed" ${sizing_type === 'fixed' ? 'selected' : ''}>Fixed Amount</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="edit-buffer-group-${id}" style="width: 100px; display: ${isFixed ? 'none' : 'block'};">
+                            <label style="font-size: 0.75rem;">Allocation %</label>
                             <input type="number" id="edit-buffer-${id}" value="${buffer}" min="1" max="100" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" id="edit-fixed-group-${id}" style="width: 100px; display: ${isFixed ? 'block' : 'none'};">
+                            <label style="font-size: 0.75rem;">Margin Amount</label>
+                            <input type="number" id="edit-fixed-amount-${id}" value="${fixed_amount}" min="0.001" step="any" required style="padding: 0.4rem; font-size: 0.9rem;">
                         </div>
                         <div class="form-group" style="flex: 2; min-width: 180px;">
                             <label style="font-size: 0.75rem;">API Key</label>
@@ -891,13 +1003,17 @@
             const name = document.getElementById(`edit-name-${id}`).value;
             const leverage = parseInt(document.getElementById(`edit-leverage-${id}`).value);
             const balance_buffer_pct = parseFloat(document.getElementById(`edit-buffer-${id}`).value);
+            const sizing_type = document.getElementById(`edit-sizing-type-${id}`).value;
+            const fixed_amount = parseFloat(document.getElementById(`edit-fixed-amount-${id}`).value);
             const api_key = document.getElementById(`edit-api-key-${id}`).value;
             const api_secret = document.getElementById(`edit-api-secret-${id}`).value;
             
             const payload = {
                 name,
                 leverage,
-                balance_buffer_pct
+                balance_buffer_pct,
+                sizing_type,
+                fixed_amount
             };
             if (api_key) payload.api_key = api_key;
             if (api_secret) payload.api_secret = api_secret;
@@ -1057,11 +1173,101 @@
             }
         });
 
+        // Fetch Open & Closed Positions and PnL
+        async function fetchPnL() {
+            try {
+                const response = await fetch('/api/pnl');
+                const data = await response.json();
+                
+                // 1. Render Open Positions
+                const openContainer = document.getElementById('open-positions-list');
+                const openPositions = data.open || [];
+                
+                if (openPositions.length === 0) {
+                    openContainer.innerHTML = `
+                        <tr>
+                            <td colspan="9" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                                No open positions active.
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    openContainer.innerHTML = '';
+                    openPositions.forEach(pos => {
+                        const row = document.createElement('tr');
+                        const pnlVal = parseFloat(pos.unrealized_pnl);
+                        const pnlColor = pnlVal > 0 ? 'var(--success)' : (pnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                        const pnlPrefix = pnlVal > 0 ? '+' : '';
+                        const sideBadge = pos.side === 'LONG' ? 
+                            `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
+                            `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
+                        
+                        row.innerHTML = `
+                            <td style="padding: 1rem; font-weight: 500;">${pos.account_name}</td>
+                            <td style="padding: 1rem; font-weight: 500;">${pos.symbol}</td>
+                            <td style="padding: 1rem;">${sideBadge}</td>
+                            <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.size}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.mark_price.toFixed(2)}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.margin.toFixed(2)}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${pos.leverage}x</td>
+                            <td style="padding: 1rem; font-weight: 600; color: ${pnlColor}; font-size: 0.9rem;">
+                                ${pnlPrefix}${pnlVal.toFixed(4)}
+                            </td>
+                        `;
+                        openContainer.appendChild(row);
+                    });
+                }
+                
+                // 2. Render Closed Positions
+                const closedContainer = document.getElementById('closed-positions-list');
+                const closedPositions = data.closed || [];
+                
+                if (closedPositions.length === 0) {
+                    closedContainer.innerHTML = `
+                        <tr>
+                            <td colspan="8" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                                No closed trade history found.
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    closedContainer.innerHTML = '';
+                    closedPositions.forEach(pos => {
+                        const row = document.createElement('tr');
+                        const pnlVal = parseFloat(pos.realized_pnl);
+                        const pnlColor = pnlVal > 0 ? 'var(--success)' : (pnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                        const pnlPrefix = pnlVal > 0 ? '+' : '';
+                        const sideBadge = pos.side === 'LONG' ? 
+                            `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
+                            `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
+                        
+                        row.innerHTML = `
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${pos.closed_at || '--'}</td>
+                            <td style="padding: 1rem; font-weight: 500;">${pos.account_name}</td>
+                            <td style="padding: 1rem; font-weight: 500;">${pos.symbol}</td>
+                            <td style="padding: 1rem;">${sideBadge}</td>
+                            <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.closed_size}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.close_price.toFixed(2)}</td>
+                            <td style="padding: 1rem; font-weight: 600; color: ${pnlColor}; font-size: 0.9rem;">
+                                ${pnlPrefix}${pnlVal.toFixed(4)}
+                            </td>
+                        `;
+                        closedContainer.appendChild(row);
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to load PnL data:", err);
+            }
+        }
+
         // Initialize lists
         fetchAccounts();
         fetchSettings();
         fetchLogs();
         fetchEmailSettings();
+        fetchPnL();
     </script>
 </body>
 </html>

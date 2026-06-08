@@ -201,3 +201,19 @@ class DeltaClient:
         logger.info(f"Placing order: {side.upper()} {size} contracts of product {product_id} (Type: {order_type}, ReduceOnly: {reduce_only})")
         response = self._request("POST", "/v2/orders", payload=payload, is_private=True)
         return response
+
+    def get_open_positions(self):
+        """Queries the private endpoint GET /v2/positions/margined for all open positions."""
+        response = self._request("GET", "/v2/positions/margined", is_private=True)
+        if response.get("success"):
+            return response.get("result", [])
+        return []
+
+    def get_closed_positions(self, limit=50):
+        """Queries the private endpoint GET /v2/positions/closed for recently closed positions."""
+        query_string = f"limit={limit}" if limit else ""
+        response = self._request("GET", "/v2/positions/closed", query_string=query_string, is_private=True)
+        if response.get("success"):
+            return response.get("result", [])
+        return []
+
