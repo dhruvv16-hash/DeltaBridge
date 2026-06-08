@@ -44,19 +44,6 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 
 db.init_app(app)
 
-# Initialize database tables on startup (unless running tests)
-if os.getenv("FLASK_ENV") != "testing":
-    with app.app_context():
-        db.create_all()
-        # Initialize default passphrase in database if not present
-        passphrase_setting = GlobalSetting.query.filter_by(key="passphrase").first()
-        if not passphrase_setting:
-            initial_passphrase = Config.PASSPHRASE or "my_secure_passphrase"
-            db.session.add(GlobalSetting(key="passphrase", value=initial_passphrase))
-            db.session.commit()
-            logger.info(f"Initialized default passphrase in database: {initial_passphrase}")
-        # Spawn daemon thread for email polling
-        init_email_listener()
 
 # Initialize static Delta REST Client for public symbols lookup
 public_delta_client = DeltaClient(
@@ -866,6 +853,20 @@ def webhook():
         except Exception as db_e:
             logger.error(f"Failed to save error log to DB: {db_e}")
         return jsonify({"status": "error", "message": "Internal Server Error", "exception": str(e)}), 500
+
+# Initialize database tables on startup (unless running tests)
+if os.getenv("FLASK_ENV") != "testing":
+    with app.app_context():
+        db.create_all()
+        # Initialize default passphrase in database if not present
+        passphrase_setting = GlobalSetting.query.filter_by(key="passphrase").first()
+        if not passphrase_setting:
+            initial_passphrase = Config.PASSPHRASE or "my_secure_passphrase"
+            db.session.add(GlobalSetting(key="passphrase", value=initial_passphrase))
+            db.session.commit()
+            logger.info(f"Initialized default passphrase in database: {initial_passphrase}")
+        # Spawn daemon thread for email polling
+        init_email_listener()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
