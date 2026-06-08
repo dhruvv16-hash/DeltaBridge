@@ -160,9 +160,31 @@ def get_account_balance(id):
 
 # ----------------- TRADING WEBHOOK ENDPOINT -----------------
 
-def execute_trades_background(accounts_data, product_id, symbol, contract_value, action):
+def execute_trades_background(accounts_data, ticker, action):
     """Processes trading signals across all configured accounts in a background thread."""
-    logger.info(f"Starting background trade execution for {symbol} (Action: {action}) on {len(accounts_data)} accounts...")
+    logger.info(f"Starting background trade execution for {ticker} (Action: {action}) on {len(accounts_data)} accounts...")
+    
+    # Retrieve product details in background
+    product = public_delta_client.get_product_by_symbol(ticker)
+    if not product:
+        logger.error(f"Symbol '{ticker}' not found on Delta Exchange in background. Aborting.")
+        return [{
+            "account_id": acc["id"],
+            "name": acc["name"],
+            "success": False,
+            "message": f"Symbol {ticker} not found on Delta Exchange"
+        } for acc in accounts_data]
+
+    product_id = product.get("id")
+    symbol = product.get("symbol")
+    contract_value_str = product.get("contract_value", "0.01")
+    try:
+        contract_value = float(contract_value_str)
+    except ValueError:
+        contract_value = 0.01
+
+    logger.info(f"Parsed Product in background: {symbol} (ID: {product_id}, Lot Size: {contract_value})")
+    
     results = []
     
     for acc in accounts_data:
@@ -365,23 +387,7 @@ def webhook():
             logger.error(f"Invalid 'action' in payload: '{action}'")
             return jsonify({"status": "error", "message": "Invalid 'action'. Must be buy, sell, close_long, or close_short"}), 400
 
-        # 3. Retrieve product details once (public endpoint, keys not needed)
-        product = public_delta_client.get_product_by_symbol(ticker)
-        if not product:
-            logger.error(f"Symbol '{ticker}' not found on Delta Exchange.")
-            return jsonify({"status": "error", "message": f"Symbol {ticker} not found on Delta Exchange"}), 400
-
-        product_id = product.get("id")
-        symbol = product.get("symbol")
-        contract_value_str = product.get("contract_value", "0.01")
-        try:
-            contract_value = float(contract_value_str)
-        except ValueError:
-            contract_value = 0.01
-
-        logger.info(f"Parsed Product: {symbol} (ID: {product_id}, Lot Size: {contract_value})")
-
-        # 4. Fetch all active accounts from the database
+        # 3. Fetch all active accounts from the database
         active_accounts = Account.query.filter_by(is_active=True).all()
         if not active_accounts:
             # Check if environment-based API keys are configured as fallback
@@ -401,7 +407,7 @@ def webhook():
                 logger.warning("No active accounts configured in database and no environment fallback API keys found. Skipping webhook execution.")
                 return jsonify({"status": "success", "message": "No active accounts configured"}), 200
 
-        # 5. Extract account data into plain dictionaries to pass to background thread
+        # 4. Extract account data into plain dictionaries to pass to background thread
         accounts_data = []
         for account in active_accounts:
             accounts_data.append({
@@ -413,16 +419,16 @@ def webhook():
                 "balance_buffer_pct": account.balance_buffer_pct
             })
 
-        # 6. Launch background thread for trade execution
+        # 5. Launch background thread for trade execution
         if os.getenv("FLASK_ENV") == "testing":
             # Run synchronously in testing to keep assertions deterministic
-            results = execute_trades_background(accounts_data, product_id, symbol, contract_value, action)
+            results = execute_trades_background(accounts_data, ticker, action)
             return jsonify({"status": "success", "results": results}), 200
         else:
             import threading
             thread = threading.Thread(
                 target=execute_trades_background,
-                args=(accounts_data, product_id, symbol, contract_value, action)
+                args=(accounts_data, ticker, action)
             )
             thread.start()
 
