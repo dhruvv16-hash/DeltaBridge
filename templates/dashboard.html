@@ -411,6 +411,52 @@
             background-color: var(--danger);
             color: var(--text-primary);
         }
+
+        /* Trade Logs and Email Integration Tab Styles */
+        table th, table td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-success {
+            background-color: rgba(16, 185, 129, 0.12);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .status-failed {
+            background-color: rgba(239, 68, 68, 0.12);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        .status-partial {
+            background-color: rgba(245, 158, 11, 0.12);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+        .status-verified {
+            background-color: rgba(139, 92, 246, 0.12);
+            color: var(--accent-primary);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+        }
+        .status-ignored {
+            background-color: rgba(160, 160, 171, 0.12);
+            color: var(--text-secondary);
+            border: 1px solid rgba(160, 160, 171, 0.2);
+        }
+        .log-details-text {
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.8rem;
+            max-width: 350px;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -426,6 +472,8 @@
         </div>
         <ul class="nav-links">
             <li class="active" data-tab="accounts-tab"><a href="#accounts">Accounts</a></li>
+            <li data-tab="logs-tab"><a href="#logs">Trade Logs</a></li>
+            <li data-tab="email-tab"><a href="#email">Email Verification</a></li>
             <li data-tab="settings-tab"><a href="#settings">Global Settings</a></li>
         </ul>
     </aside>
@@ -481,6 +529,86 @@
                         Loading configured accounts...
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- TRADE LOGS TAB PANEL -->
+        <section id="logs-tab" class="tab-panel">
+            <div class="card">
+                <div class="card-title">
+                    <span>Audit Execution Logs</span>
+                    <button class="btn btn-secondary btn-sm" onclick="fetchLogs()">Refresh Logs</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--border-color); color: var(--text-secondary); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">
+                                <th style="padding: 1rem;">Timestamp</th>
+                                <th style="padding: 1rem;">Ticker</th>
+                                <th style="padding: 1rem;">Action</th>
+                                <th style="padding: 1rem;">Source</th>
+                                <th style="padding: 1rem;">Status</th>
+                                <th style="padding: 1rem;">Execution Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-list">
+                            <tr style="color: var(--text-secondary);"><td colspan="6" style="padding: 2rem; text-align: center;">Loading logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- EMAIL INTEGRATION TAB PANEL -->
+        <section id="email-tab" class="tab-panel">
+            <div class="card">
+                <div class="card-title">TradingView Email Integration & Verification</div>
+                <form id="email-settings-form">
+                    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+                        <label class="switch">
+                            <input type="checkbox" id="email-enabled">
+                            <span class="slider"></span>
+                        </label>
+                        <span style="font-weight: 500;">Enable Email Double-Verification & Fallback Executor</span>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="imap-host">IMAP Server Host</label>
+                            <input type="text" id="imap-host" value="imap.gmail.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="imap-port">IMAP Server Port</label>
+                            <input type="number" id="imap-port" value="993" required>
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="email-address">Email Address</label>
+                            <input type="text" id="email-address" placeholder="yourname@gmail.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email-password">App Password</label>
+                            <input type="password" id="email-password" placeholder="Enter Gmail App Password" required>
+                            <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                Note: For Gmail, use a 16-character App Password (not your primary password).
+                            </span>
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="email-sender">Sender Email Filter</label>
+                            <input type="text" id="email-sender" value="noreply@tradingview.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email-subject">Subject Keyword Filter</label>
+                            <input type="text" id="email-subject" value="TradingView Alert" required>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                        <button type="submit" class="btn btn-primary">Save Email Settings</button>
+                        <button type="button" id="test-email-btn" class="btn btn-secondary">Test Connection</button>
+                    </div>
+                </form>
             </div>
         </section>
 
@@ -718,9 +846,143 @@
             }
         }
 
+        // Fetch Trade Logs
+        async function fetchLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const logs = await response.json();
+                
+                const listContainer = document.getElementById('logs-list');
+                if (logs.length === 0) {
+                    listContainer.innerHTML = `
+                        <tr>
+                            <td colspan="6" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                                No trade execution logs found.
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+                
+                listContainer.innerHTML = '';
+                logs.forEach(log => {
+                    const row = document.createElement('tr');
+                    
+                    let timeStr = log.timestamp;
+                    if (timeStr) {
+                        const d = new Date(timeStr);
+                        timeStr = d.toLocaleString();
+                    } else {
+                        timeStr = '--';
+                    }
+                    
+                    const statusClass = 'status-' + log.status;
+                    
+                    row.innerHTML = `
+                        <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${timeStr}</td>
+                        <td style="padding: 1rem; font-weight: 500;">${log.ticker}</td>
+                        <td style="padding: 1rem; text-transform: uppercase; font-size: 0.8rem;">${log.action}</td>
+                        <td style="padding: 1rem; text-transform: capitalize; color: var(--text-secondary); font-size: 0.85rem;">${log.source}</td>
+                        <td style="padding: 1rem;"><span class="status-badge ${statusClass}">${log.status}</span></td>
+                        <td style="padding: 1rem;"><div class="log-details-text">${log.details || '--'}</div></td>
+                    `;
+                    listContainer.appendChild(row);
+                });
+            } catch (err) {
+                console.error("Failed to load logs:", err);
+            }
+        }
+
+        // Fetch Email Settings
+        async function fetchEmailSettings() {
+            try {
+                const response = await fetch('/api/email-settings');
+                const settings = await response.json();
+                
+                document.getElementById('email-enabled').checked = settings.enabled;
+                document.getElementById('imap-host').value = settings.imap_host || 'imap.gmail.com';
+                document.getElementById('imap-port').value = settings.imap_port || '993';
+                document.getElementById('email-address').value = settings.email_address || '';
+                document.getElementById('email-password').value = settings.email_password || '';
+                document.getElementById('email-sender').value = settings.email_sender || 'noreply@tradingview.com';
+                document.getElementById('email-subject').value = settings.email_subject || 'TradingView Alert';
+            } catch (err) {
+                console.error("Failed to load email settings:", err);
+            }
+        }
+
+        // Save Email Settings
+        document.getElementById('email-settings-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const payload = {
+                enabled: document.getElementById('email-enabled').checked,
+                imap_host: document.getElementById('imap-host').value,
+                imap_port: parseInt(document.getElementById('imap-port').value),
+                email_address: document.getElementById('email-address').value,
+                email_password: document.getElementById('email-password').value,
+                email_sender: document.getElementById('email-sender').value,
+                email_subject: document.getElementById('email-subject').value
+            };
+            
+            try {
+                const response = await fetch('/api/email-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    showToast("Email integration settings saved successfully!");
+                    fetchEmailSettings();
+                } else {
+                    showToast("Failed to save email settings", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        });
+
+        // Test Email Connection
+        document.getElementById('test-email-btn').addEventListener('click', async function() {
+            const btn = this;
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'Connecting...';
+            
+            const payload = {
+                imap_host: document.getElementById('imap-host').value,
+                imap_port: parseInt(document.getElementById('imap-port').value),
+                email_address: document.getElementById('email-address').value,
+                email_password: document.getElementById('email-password').value
+            };
+            
+            try {
+                const response = await fetch('/api/email-settings/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                if (response.ok && data.status === "success") {
+                    showToast("IMAP connection and login test: SUCCESSFUL!");
+                } else {
+                    showToast(data.message || "IMAP connection failed", false);
+                }
+            } catch (err) {
+                showToast("Network error occurred during test", false);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        });
+
         // Initialize lists
         fetchAccounts();
         fetchSettings();
+        fetchLogs();
+        fetchEmailSettings();
     </script>
 </body>
 </html>

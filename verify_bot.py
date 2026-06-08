@@ -344,9 +344,86 @@ class TestWebhookEndpoints(unittest.TestCase):
                 api_secret='env_fallback_secret',
                 base_url=Config.BASE_URL
             )
+    def test_email_parsing_heuristics(self):
+        """Verify email parsing correctly extracts ticker and action from different formats."""
+        from app import parse_email_signal
+        
+        # Format 1: JSON body
+        body_json = 'Some text before\n{\n  "action": "buy",\n  "ticker": "ETHUSD.P"\n}\nSome text after'
+        subject = "Alert triggered"
+        ticker, action = parse_email_signal(body_json, subject)
+        self.assertEqual(ticker, "ETHUSD.P")
+        self.assertEqual(action, "buy")
+        
+        # Format 2: Key-value text
+        body_kv = "Hello,\nTicker: BTCUSD.P\nAction: sell\nThanks"
+        ticker, action = parse_email_signal(body_kv, subject)
+        self.assertEqual(ticker, "BTCUSD.P")
+        self.assertEqual(action, "sell")
+        
+        # Format 3: Subject line fallback
+        body_empty = "This is a custom alert mail body."
+        subject_buy = "Buy ETHUSD.P Alert"
+        ticker, action = parse_email_signal(body_empty, subject_buy)
+        self.assertEqual(ticker, "ETHUSD.P")
+        self.assertEqual(action, "buy")
+
+    @patch('app.DeltaClient')
+    def test_trade_logging_in_database(self, mock_client_class):
+        """Verify that trade logs are correctly recorded in the SQLite database."""
+        from app import TradeLog
+        
+        # Setup mock client
+        mock_client = mock_client_class.return_value
+        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+        mock_client.get_position.return_value = None
+        mock_client.get_ticker.return_value = {"mark_price": "2000"}
+        mock_client.get_available_balance.return_value = (10.0, "USD")
+        mock_client.place_order.return_value = {"success": True, "result": {"id": 111}}
+        
+        # Count initial logs
+        initial_count = TradeLog.query.count()
+        
+        # Trigger webhook
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(TradeLog.query.count(), initial_count + 1)
+        
+        latest_log = TradeLog.query.order_by(TradeLog.id.desc()).first()
+        self.assertEqual(latest_log.ticker, "ETHUSD.P")
+        self.assertEqual(latest_log.action, "buy")
+        self.assertEqual(latest_log.status, "success")
+        self.assertIn("Test Account 1: Success", latest_log.details)
+
+    @patch('app.DeltaClient')
+    def test_position_reconciliation_logic(self, mock_client_class):
+        """Verify reconciliation checks skip matched positions and execute fallback for mismatched ones."""
+        from app import check_position_matches_action
+        
+        mock_client = mock_client_class.return_value
+        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27}
+        
+        account_data = {
+            "api_key": "key1",
+            "api_secret": "secret1"
+        }
+        
+        # Scenario 1: Long position matches "buy" action
+        mock_client.get_position.return_value = {"product_id": 27, "size": "10", "side": "buy"}
+        self.assertTrue(check_position_matches_action(account_data, "ETHUSD.P", "buy"))
+        
+        # Scenario 2: Short position mismatches "buy" action
+        mock_client.get_position.return_value = {"product_id": 27, "size": "-10", "side": "sell"}
+        self.assertFalse(check_position_matches_action(account_data, "ETHUSD.P", "buy"))
+        
+        # Scenario 3: No position matches "close_long" action
+        mock_client.get_position.return_value = None
+        self.assertTrue(check_position_matches_action(account_data, "ETHUSD.P", "close_long"))
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
