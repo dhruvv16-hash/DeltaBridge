@@ -130,9 +130,9 @@ Configure these environment variables in your server configuration (or a local `
 | `DELTA_API_SECRET` | Default Delta API Secret (fallback if database is empty) | `your_delta_api_secret` |
 | `DELTA_BASE_URL` | Base API Endpoint (Global, India, or Testnet) | `https://api.delta.exchange` |
 | `PASSPHRASE` | Custom secure passphrase to authenticate webhooks | `your_secure_trading_passphrase` |
-| `DEFAULT_LEVERAGE` | Target leverage used to calculate dynamic sizing | `50` |
-| `BALANCE_BUFFER_PCT` | Margin buffer percentage (e.g., 95 uses 95% equity, 5% fee cushion) | `95` |
-| `TRADING_SYMBOL` | Target default symbol for local strategy runner | `BTCUSD.P` |
+| `DEFAULT_LEVERAGE` | Target leverage used to calculate dynamic sizing | `leverage` |
+| `BALANCE_BUFFER_PCT` | Margin buffer percentage (e.g., 95 uses 95% equity, 5% fee cushion) | `balance%` |
+| `TRADING_SYMBOL` | Target default symbol for local strategy runner | `symbol` |
 
 ---
 
