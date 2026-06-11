@@ -1175,7 +1175,12 @@
                 if (response.ok) {
                     showToast("Test notification dispatched!");
                 } else {
-                    showToast("Failed to send test notification", false);
+                    try {
+                        const errData = await response.json();
+                        showToast("Failed: " + errData.message, false);
+                    } catch (e) {
+                        showToast("Failed to send test notification", false);
+                    }
                 }
             } catch (err) {
                 showToast("Error occurred testing alerts", false);

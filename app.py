@@ -56,7 +56,8 @@ def send_notification(title, message, status_color=3447003):
     import requests
     # Ensure this doesn't run during testing to avoid making external requests
     if os.getenv("FLASK_ENV") == "testing":
-        return
+        return {"telegram": {"success": True}, "discord": {"success": True}}
+    results = {"telegram": {"success": True}, "discord": {"success": True}}
     try:
         telegram_enabled = GlobalSetting.query.filter_by(key="telegram_enabled").first()
         telegram_token = GlobalSetting.query.filter_by(key="telegram_token").first()
@@ -79,8 +80,12 @@ def send_notification(title, message, status_color=3447003):
                 res = requests.post(discord_webhook_url.value, json=payload, timeout=5)
                 if res.status_code >= 400:
                     logger.error(f"Discord notification HTTP error: {res.status_code} - {res.text}")
+                    results["discord"] = {"success": False, "error": f"HTTP {res.status_code}: {res.text}"}
+                else:
+                    results["discord"] = {"success": True}
             except Exception as e:
                 logger.error(f"Failed to post to Discord webhook: {e}")
+                results["discord"] = {"success": False, "error": str(e)}
 
         # Telegram Message
         if telegram_enabled and telegram_enabled.value.lower() == "true" and telegram_token and telegram_token.value and telegram_chat_id and telegram_chat_id.value:
@@ -94,10 +99,16 @@ def send_notification(title, message, status_color=3447003):
                 res = requests.post(url, json=payload, timeout=5)
                 if res.status_code >= 400:
                     logger.error(f"Telegram notification HTTP error: {res.status_code} - {res.text}")
+                    results["telegram"] = {"success": False, "error": f"HTTP {res.status_code}: {res.text}"}
+                else:
+                    results["telegram"] = {"success": True}
             except Exception as e:
                 logger.error(f"Failed to send to Telegram bot: {e}")
+                results["telegram"] = {"success": False, "error": str(e)}
     except Exception as e:
         logger.error(f"Error executing send_notification: {e}")
+        results["error"] = str(e)
+    return results
 
 
 # ----------------- EMAIL DOUBLE-VERIFICATION INTEGRATION -----------------
@@ -425,7 +436,26 @@ def save_settings():
 def test_notification():
     title = "🔔 Delta Bot Alert: Test Connection"
     message = "Your Telegram and Discord alert integration was configured and tested successfully!"
-    send_notification(title, message, 3447003)
+    results = send_notification(title, message, 3447003)
+    
+    # Check if enabled integrations failed and report detailed error messages
+    telegram_enabled = GlobalSetting.query.filter_by(key="telegram_enabled").first()
+    discord_enabled = GlobalSetting.query.filter_by(key="discord_enabled").first()
+    
+    errors = []
+    if telegram_enabled and telegram_enabled.value.lower() == "true":
+        tel_res = results.get("telegram", {})
+        if not tel_res.get("success"):
+            errors.append(f"Telegram: {tel_res.get('error', 'unknown error')}")
+            
+    if discord_enabled and discord_enabled.value.lower() == "true":
+        disc_res = results.get("discord", {})
+        if not disc_res.get("success"):
+            errors.append(f"Discord: {disc_res.get('error', 'unknown error')}")
+            
+    if errors:
+        return jsonify({"status": "error", "message": " | ".join(errors)}), 400
+        
     return jsonify({"status": "success", "message": "Test notification dispatched"})
 
 @app.route("/api/simulate-webhook", methods=["POST"])
