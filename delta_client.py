@@ -144,7 +144,8 @@ class DeltaClient:
 
     def get_available_balance(self):
         """
-        Retrieves the wallet balances and returns the highest available stablecoin (USDT/USDC) balance.
+        Retrieves the wallet balances and returns the highest available stablecoin (USDT/USDC/INR) balance.
+        If the asset is INR, it converts it to USD/USDT equivalent using Delta India's fixed conversion rate of 85.0.
         """
         response = self._request("GET", "/v2/wallet/balances", is_private=True)
         if not response.get("success"):
@@ -162,12 +163,20 @@ class DeltaClient:
             except (ValueError, TypeError):
                 avail = 0.0
                 
-            if asset in ["USDT", "USDC", "USD", "DETO"] and avail > available_balance:
+            # Delta Exchange India uses a fixed USD-INR conversion rate of 85.0
+            if asset == "INR":
+                avail = avail / 85.0
+                asset_to_check = "INR"
+            else:
+                asset_to_check = asset
+                
+            if asset_to_check in ["USDT", "USDC", "USD", "DETO", "INR"] and avail > available_balance:
                 available_balance = avail
-                settling_asset = asset
+                settling_asset = "USDT" if asset == "INR" else asset
                 
         logger.info(f"Retrieved balance: {available_balance} {settling_asset}")
         return available_balance, settling_asset
+
 
     def get_position(self, product_id):
         """Fetches the current open position size for a specific product ID."""

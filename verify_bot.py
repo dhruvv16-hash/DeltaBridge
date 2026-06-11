@@ -469,6 +469,40 @@ class TestPnLTracking(unittest.TestCase):
         self.app_context.pop()
 
     @patch('delta_client.requests.get')
+    def test_delta_client_get_available_balance(self, mock_get):
+        """Test DeltaClient.get_available_balance with standard stablecoins and INR."""
+        client = DeltaClient(api_key="key", api_secret="secret", base_url="https://api.delta.exchange")
+        
+        # Scenario A: Standard USDT/USDC wallet
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            "success": True,
+            "result": [
+                {"asset_symbol": "USDT", "available_balance": "100.5"},
+                {"asset_symbol": "USDC", "available_balance": "50.0"}
+            ]
+        }
+        mock_get.return_value = mock_response
+        balance, asset = client.get_available_balance()
+        self.assertEqual(balance, 100.5)
+        self.assertEqual(asset, "USDT")
+        
+        # Scenario B: INR wallet (Delta Exchange India) converted using 85.0 fixed rate
+        mock_response_inr = MagicMock()
+        mock_response_inr.ok = True
+        mock_response_inr.json.return_value = {
+            "success": True,
+            "result": [
+                {"asset_symbol": "INR", "available_balance": "8500.0"}
+            ]
+        }
+        mock_get.return_value = mock_response_inr
+        balance_inr, asset_inr = client.get_available_balance()
+        self.assertAlmostEqual(balance_inr, 100.0, places=4)
+        self.assertEqual(asset_inr, "USDT")
+
+    @patch('delta_client.requests.get')
     def test_delta_client_positions(self, mock_get):
         """Test DeltaClient methods get_open_positions and get_closed_positions."""
         client = DeltaClient(api_key="key", api_secret="secret", base_url="https://api.delta.exchange")
