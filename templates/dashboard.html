@@ -1229,12 +1229,14 @@
                 document.getElementById('expand-text').innerText = `Show All History (${window.closedPositionsCache.length} trades)`;
                 document.getElementById('expand-arrow').innerText = '▼';
                 paginationContainer.style.display = 'none';
+                controlsContainer.style.justifyContent = 'center';
             } else {
                 const startIdx = (window.closedPositionsCurrentPage - 1) * closedPositionsPageSize;
                 const endIdx = startIdx + closedPositionsPageSize;
                 displayPositions = window.closedPositionsCache.slice(startIdx, endIdx);
                 document.getElementById('expand-text').innerText = 'Collapse';
                 document.getElementById('expand-arrow').innerText = '▲';
+                controlsContainer.style.justifyContent = 'space-between';
                 
                 renderClosedPositionsPagination();
             }
@@ -1308,19 +1310,40 @@
             };
             paginationContainer.appendChild(prevBtn);
 
-            // Page numbers
+            // Generate smart pagination range: e.g. 1 2 3 ... 10
+            const current = window.closedPositionsCurrentPage;
+            const delta = 1; // Show current page and 1 page before & after
+            const range = [];
+
             for (let i = 1; i <= totalPages; i++) {
-                const pageBtn = document.createElement('button');
-                pageBtn.className = i === window.closedPositionsCurrentPage ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
-                pageBtn.style.padding = '0.25rem 0.6rem';
-                pageBtn.style.minWidth = '2rem';
-                pageBtn.innerText = i;
-                pageBtn.onclick = () => {
-                    window.closedPositionsCurrentPage = i;
-                    renderClosedPositionsTable();
-                };
-                paginationContainer.appendChild(pageBtn);
+                if (i === 1 || i === totalPages || (i >= current - delta && i <= current + delta)) {
+                    range.push(i);
+                } else if (range[range.length - 1] !== '...') {
+                    range.push('...');
+                }
             }
+
+            range.forEach(p => {
+                if (p === '...') {
+                    const span = document.createElement('span');
+                    span.style.padding = '0.25rem 0.5rem';
+                    span.style.color = 'var(--text-secondary)';
+                    span.style.userSelect = 'none';
+                    span.innerText = '...';
+                    paginationContainer.appendChild(span);
+                } else {
+                    const pageBtn = document.createElement('button');
+                    pageBtn.className = p === window.closedPositionsCurrentPage ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+                    pageBtn.style.padding = '0.25rem 0.6rem';
+                    pageBtn.style.minWidth = '2rem';
+                    pageBtn.innerText = p;
+                    pageBtn.onclick = () => {
+                        window.closedPositionsCurrentPage = p;
+                        renderClosedPositionsTable();
+                    };
+                    paginationContainer.appendChild(pageBtn);
+                }
+            });
 
             // Next button
             const nextBtn = document.createElement('button');
