@@ -500,7 +500,7 @@ class TestPnLTracking(unittest.TestCase):
         mock_get.return_value = mock_response_inr
         balance_inr, asset_inr = client.get_available_balance()
         self.assertAlmostEqual(balance_inr, 100.0, places=4)
-        self.assertEqual(asset_inr, "USDT")
+        self.assertEqual(asset_inr, "USD")
 
     @patch('delta_client.requests.get')
     def test_delta_client_positions(self, mock_get):

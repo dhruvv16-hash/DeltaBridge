@@ -172,7 +172,7 @@ class DeltaClient:
                 
             if asset_to_check in ["USDT", "USDC", "USD", "DETO", "INR"] and avail > available_balance:
                 available_balance = avail
-                settling_asset = "USDT" if asset == "INR" else asset
+                settling_asset = "USD" if asset == "INR" else asset
                 
         logger.info(f"Retrieved balance: {available_balance} {settling_asset}")
         return available_balance, settling_asset
