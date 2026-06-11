@@ -19,14 +19,26 @@ class Config:
     PASSPHRASE = os.getenv("PASSPHRASE")
     
     # Trading Defaults
-    DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "50"))
+    DEFAULT_LEVERAGE = 50
+    try:
+        DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "50"))
+    except ValueError:
+        pass
     
     # Risk Management / Margin Buffer
     # percentage of available balance to allocate per trade (e.g. 95 means 95%, leaving a 5% buffer for fees/slippage)
-    BALANCE_BUFFER_PCT = float(os.getenv("BALANCE_BUFFER_PCT", "95")) / 100.0
+    BALANCE_BUFFER_PCT = 0.95
+    try:
+        _raw_buf = os.getenv("BALANCE_BUFFER_PCT", "95")
+        if isinstance(_raw_buf, str):
+            _raw_buf = _raw_buf.replace("%", "").strip()
+        BALANCE_BUFFER_PCT = float(_raw_buf) / 100.0
+    except ValueError:
+        pass
 
     # Trading Symbol / Asset Configuration (e.g. BTCUSD.P, SOLUSD.P)
-    TRADING_SYMBOL = os.getenv("TRADING_SYMBOL", "")
+    _raw_symbol = os.getenv("TRADING_SYMBOL", "")
+    TRADING_SYMBOL = "" if _raw_symbol == "symbol" else _raw_symbol
 
     @classmethod
     def validate(cls):
