@@ -489,13 +489,26 @@ class TestPnLTracking(unittest.TestCase):
         self.assertEqual(open_pos[0]["product_id"], 27)
         self.assertEqual(open_pos[0]["unrealized_pnl"], "5.5")
         
-        # 2. Mock Closed Positions response
+        # 2. Mock Closed Positions (Orders History) response
         mock_closed_response = MagicMock()
         mock_closed_response.ok = True
         mock_closed_response.json.return_value = {
             "success": True,
             "result": [
-                {"product_id": 27, "closed_size": "10", "side": "sell", "realized_pnl": "-2.5", "closed_at": "1700000000000"}
+                {
+                    "product_id": 27,
+                    "product": {"symbol": "ETHUSD", "contract_value": "0.01"},
+                    "size": 10.0,
+                    "side": "sell",
+                    "average_fill_price": "1840.0",
+                    "paid_commission": "0.05",
+                    "state": "closed",
+                    "created_at": "2026-06-11T18:10:07.453981Z",
+                    "meta_data": {
+                        "pnl": "-2.5",
+                        "entry_price": "1850.0"
+                    }
+                }
             ]
         }
         mock_get.return_value = mock_closed_response
@@ -503,7 +516,9 @@ class TestPnLTracking(unittest.TestCase):
         closed_pos = client.get_closed_positions(limit=50)
         self.assertEqual(len(closed_pos), 1)
         self.assertEqual(closed_pos[0]["product_id"], 27)
-        self.assertEqual(closed_pos[0]["realized_pnl"], "-2.5")
+        self.assertEqual(closed_pos[0]["realized_pnl"], -2.5)
+        self.assertEqual(closed_pos[0]["side"], "LONG")
+        self.assertEqual(closed_pos[0]["closed_at"], "2026-06-11T18:10:07.453981Z")
 
     @patch('app.DeltaClient')
     @patch('app.public_delta_client')

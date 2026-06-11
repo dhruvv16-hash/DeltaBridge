@@ -210,10 +210,77 @@ class DeltaClient:
         return []
 
     def get_closed_positions(self, limit=50):
-        """Queries the private endpoint GET /v2/positions/closed for recently closed positions."""
-        query_string = f"limit={limit}" if limit else ""
-        response = self._request("GET", "/v2/positions/closed", query_string=query_string, is_private=True)
-        if response.get("success"):
-            return response.get("result", [])
-        return []
+        """Reconstructs closed positions by querying order history since GET /v2/positions/closed is not supported."""
+        query_string = f"limit={limit}&page_size={limit}" if limit else ""
+        response = self._request("GET", "/v2/orders/history", query_string=query_string, is_private=True)
+        if not response.get("success"):
+            return []
+            
+        orders = response.get("result", [])
+        closed_positions = []
+        for order in orders:
+            meta = order.get("meta_data") or {}
+            pnl_str = meta.get("pnl") or meta.get("cashflow")
+            entry_px_str = meta.get("entry_price")
+            
+            try:
+                pnl_val = float(pnl_str) if pnl_str is not None else 0.0
+            except ValueError:
+                pnl_val = 0.0
+                
+            is_close_order = False
+            if entry_px_str is not None:
+                is_close_order = True
+            elif order.get("reduce_only"):
+                is_close_order = True
+            elif pnl_val != 0.0:
+                is_close_order = True
+                
+            if is_close_order and order.get("state") == "closed":
+                order_side = order.get("side", "").lower()
+                # A sell order closes a LONG position; a buy order closes a SHORT position
+                pos_side = "LONG" if order_side == "sell" else "SHORT"
+                
+                prod_info = order.get("product") or {}
+                symbol = prod_info.get("symbol") or order.get("product_symbol") or f"ID:{order.get('product_id')}"
+                
+                try:
+                    closed_size = float(order.get("size") or 0.0)
+                except (ValueError, TypeError):
+                    closed_size = 0.0
+                    
+                try:
+                    entry_price = float(entry_px_str) if entry_px_str else 0.0
+                except (ValueError, TypeError):
+                    entry_price = 0.0
+                    
+                try:
+                    close_price = float(order.get("average_fill_price") or 0.0)
+                except (ValueError, TypeError):
+                    close_price = 0.0
+                    
+                # Read contract value to estimate entry fee
+                contract_val_str = prod_info.get("contract_value") or "0.01"
+                try:
+                    contract_value = float(contract_val_str)
+                except ValueError:
+                    contract_value = 0.01
+                    
+                # Estimate total round-trip fee: actual exit fee + estimated entry fee
+                exit_fee = float(order.get("paid_commission") or 0.0)
+                entry_fee = entry_price * closed_size * contract_value * 0.0005
+                fee = exit_fee + entry_fee
+                
+                closed_positions.append({
+                    "product_id": order.get("product_id"),
+                    "symbol": symbol,
+                    "side": pos_side,
+                    "closed_size": closed_size,
+                    "entry_price": entry_price,
+                    "close_price": close_price,
+                    "realized_pnl": pnl_val,
+                    "fee": fee,
+                    "closed_at": order.get("updated_at") or order.get("created_at")
+                })
+        return closed_positions
 
