@@ -673,10 +673,11 @@
                 </div>
             </div>
 
-            <!-- Closed Trades Card -->
+            <!-- Closed Position History Card -->
             <div class="card">
                 <div class="card-title">
                     <span>Closed Position History</span>
+                    <button class="btn btn-secondary btn-sm" onclick="exportJournal()">Export Trade Journal (CSV)</button>
                 </div>
                 <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
@@ -689,11 +690,13 @@
                                 <th style="padding: 1rem;">Closed Size</th>
                                 <th style="padding: 1rem;">Entry Price</th>
                                 <th style="padding: 1rem;">Exit Price</th>
-                                <th style="padding: 1rem;">Realized PnL</th>
+                                <th style="padding: 1rem;">Gross PnL</th>
+                                <th style="padding: 1rem;">Fees</th>
+                                <th style="padding: 1rem;">Net PnL</th>
                             </tr>
                         </thead>
                         <tbody id="closed-positions-list">
-                            <tr style="color: var(--text-secondary);"><td colspan="8" style="padding: 2rem; text-align: center;">Loading closed position history...</td></tr>
+                            <tr style="color: var(--text-secondary);"><td colspan="10" style="padding: 2rem; text-align: center;">Loading closed position history...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1173,6 +1176,11 @@
             }
         });
 
+        function exportJournal() {
+            window.location.href = '/api/journal/export';
+            showToast('Exporting trade journal (CSV)...');
+        }
+
         // Fetch Open & Closed Positions and PnL
         async function fetchPnL() {
             try {
@@ -1226,7 +1234,7 @@
                 if (closedPositions.length === 0) {
                     closedContainer.innerHTML = `
                         <tr>
-                            <td colspan="8" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                            <td colspan="10" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
                                 No closed trade history found.
                             </td>
                         </tr>
@@ -1236,8 +1244,15 @@
                     closedPositions.forEach(pos => {
                         const row = document.createElement('tr');
                         const pnlVal = parseFloat(pos.realized_pnl);
+                        const feesVal = parseFloat(pos.fees || 0);
+                        const netPnlVal = parseFloat(pos.net_pnl || pnlVal);
+                        
                         const pnlColor = pnlVal > 0 ? 'var(--success)' : (pnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
                         const pnlPrefix = pnlVal > 0 ? '+' : '';
+                        
+                        const netPnlColor = netPnlVal > 0 ? 'var(--success)' : (netPnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                        const netPnlPrefix = netPnlVal > 0 ? '+' : '';
+                        
                         const sideBadge = pos.side === 'LONG' ? 
                             `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
                             `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
@@ -1250,8 +1265,12 @@
                             <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.closed_size}</td>
                             <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
                             <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.close_price.toFixed(2)}</td>
-                            <td style="padding: 1rem; font-weight: 600; color: ${pnlColor}; font-size: 0.9rem;">
+                            <td style="padding: 1rem; font-weight: 500; color: ${pnlColor}; font-size: 0.9rem;">
                                 ${pnlPrefix}${pnlVal.toFixed(4)}
+                            </td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${feesVal.toFixed(4)}</td>
+                            <td style="padding: 1rem; font-weight: 600; color: ${netPnlColor}; font-size: 0.9rem;">
+                                ${netPnlPrefix}${netPnlVal.toFixed(4)}
                             </td>
                         `;
                         closedContainer.appendChild(row);

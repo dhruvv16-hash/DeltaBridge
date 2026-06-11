@@ -568,6 +568,68 @@ class TestPnLTracking(unittest.TestCase):
         self.assertEqual(closed_list[0]["side"], "SHORT")
         self.assertEqual(closed_list[0]["closed_size"], 5.0)
         self.assertEqual(closed_list[0]["realized_pnl"], -50.0)
+        self.assertIn("fees", closed_list[0])
+        self.assertIn("net_pnl", closed_list[0])
+        self.assertAlmostEqual(closed_list[0]["fees"], 0.09225, places=5)
+        self.assertAlmostEqual(closed_list[0]["net_pnl"], -50.09225, places=5)
+
+    @patch('app.DeltaClient')
+    @patch('app.public_delta_client')
+    def test_export_journal_csv(self, mock_public_client, mock_client_class):
+        """Test that the /api/journal/export endpoint generates a valid CSV file download."""
+        # Mock public product list
+        mock_public_client.get_products.return_value = [
+            {"id": 27, "symbol": "ETHUSD", "contract_value": "0.01"}
+        ]
+        
+        # Mock private client instance
+        mock_private_client = mock_client_class.return_value
+        
+        # Mock closed positions return
+        mock_private_client.get_closed_positions.return_value = [
+            {
+                "product_id": 27,
+                "closed_size": "10",
+                "side": "buy",
+                "entry_price": "2000",
+                "close_price": "2020",
+                "realized_pnl": "2.0",
+                "closed_at": "1700000000"
+            }
+        ]
+        
+        response = self.app.get('/api/journal/export')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content_type, "text/csv")
+        self.assertIn("attachment; filename=trading_journal.csv", response.headers["Content-Disposition"])
+        
+        # Decode and parse CSV output
+        csv_text = response.data.decode('utf-8')
+        lines = csv_text.splitlines()
+        
+        # Verify headers exist
+        self.assertGreater(len(lines), 1)
+        headers = lines[0].split(',')
+        self.assertEqual(headers[0], "Closed Time (UTC)")
+        self.assertEqual(headers[1], "Account Name")
+        self.assertEqual(headers[2], "Symbol")
+        self.assertEqual(headers[7], "Gross PnL (USD)")
+        self.assertEqual(headers[8], "Fees & Commission (USD)")
+        self.assertEqual(headers[9], "Net PnL (USD)")
+        
+        # Verify data row values
+        row = lines[1].split(',')
+        self.assertEqual(row[1], "PnL Test Account")
+        self.assertEqual(row[2], "ETHUSD")
+        self.assertEqual(row[3], "LONG")
+        self.assertEqual(row[4], "10.0")
+        self.assertEqual(row[7], "2.0000") # Gross PnL
+        
+        # Expected Fees: entry_notional = 2000 * 10 * 0.01 = 200. exit_notional = 2020 * 10 * 0.01 = 202.
+        # total_notional = 402. fees = 402 * 0.0005 = 0.2010.
+        # Expected Net PnL: 2.0 - 0.201 = 1.7990.
+        self.assertEqual(row[8], "0.2010") # Fees
+        self.assertEqual(row[9], "1.7990") # Net PnL
 
 class TestSizingModels(unittest.TestCase):
     def setUp(self):

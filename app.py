@@ -2,7 +2,7 @@ import os
 import math
 import time
 import logging
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, make_response
 from config import Config
 from delta_client import DeltaClient
 from models import db, Account, GlobalSetting, TradeLog
@@ -477,6 +477,30 @@ def get_pnl():
                         except Exception:
                             closed_at_str = str(closed_at)
                             
+                    # Determine contract value from product specifications
+                    contract_val_str = prod_info.get("contract_value") or "0.01"
+                    try:
+                        contract_value = float(contract_val_str)
+                    except ValueError:
+                        contract_value = 0.01
+
+                    # Retrieve actual commission fee or calculate 0.05% taker fee round-trip fallback
+                    realized_fee_val = pos.get("fee") or pos.get("realized_fee") or pos.get("commission")
+                    if realized_fee_val is not None:
+                        try:
+                            fees = abs(float(realized_fee_val))
+                        except (ValueError, TypeError):
+                            fees = 0.0
+                    else:
+                        entry_px = float(pos.get("entry_price") or pos.get("avg_entry_price") or 0)
+                        exit_px = float(pos.get("close_price") or pos.get("exit_price") or pos.get("avg_exit_price") or 0)
+                        c_size = abs(float(closed_size))
+                        entry_notional = entry_px * c_size * contract_value
+                        exit_notional = exit_px * c_size * contract_value
+                        fees = (entry_notional + exit_notional) * 0.0005
+
+                    net_pnl = float(rpnl) - fees
+
                     closed_positions.append({
                         "account_name": account.name,
                         "product_id": product_id,
@@ -486,6 +510,8 @@ def get_pnl():
                         "entry_price": float(pos.get("entry_price") or pos.get("avg_entry_price") or 0),
                         "close_price": float(pos.get("close_price") or pos.get("exit_price") or pos.get("avg_exit_price") or 0),
                         "realized_pnl": float(rpnl),
+                        "fees": fees,
+                        "net_pnl": net_pnl,
                         "closed_at": closed_at_str,
                         "closed_at_raw": closed_at_raw
                     })
@@ -505,6 +531,176 @@ def get_pnl():
         })
     except Exception as e:
         logger.exception(f"Error in /api/pnl endpoint: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/journal/export", methods=["GET"])
+def export_journal():
+    """Generates and downloads a CSV trade journal aggregating all closed positions across active accounts."""
+    import csv
+    import io
+    import datetime
+    try:
+        active_accounts = Account.query.filter_by(is_active=True).all()
+        if not active_accounts:
+            if Config.API_KEY and Config.API_SECRET:
+                fallback_account = Account(
+                    id=0,
+                    name="Environment Default",
+                    api_key=Config.API_KEY,
+                    api_secret=Config.API_SECRET,
+                    leverage=Config.DEFAULT_LEVERAGE,
+                    balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                    sizing_type="percentage",
+                    fixed_amount=10.0,
+                    is_active=True
+                )
+                active_accounts = [fallback_account]
+
+        products = []
+        try:
+            products = public_delta_client.get_products()
+        except Exception as e:
+            logger.warning(f"Failed to fetch products for symbol translation in /api/journal/export: {e}")
+            
+        product_map = {p.get("id"): p for p in products if p.get("id")}
+        
+        closed_positions = []
+        
+        for account in active_accounts:
+            try:
+                client = DeltaClient(
+                    api_key=account.api_key,
+                    api_secret=account.api_secret,
+                    base_url=Config.BASE_URL
+                )
+                closed = client.get_closed_positions(limit=100)
+                for pos in closed:
+                    product_id = pos.get("product_id")
+                    prod_info = product_map.get(product_id) or pos.get("product") or {}
+                    symbol = prod_info.get("symbol") or f"ID:{product_id}"
+                    
+                    side_raw = pos.get("side", "").lower()
+                    if side_raw in ["buy", "long"]:
+                        side = "LONG"
+                    elif side_raw in ["sell", "short"]:
+                        side = "SHORT"
+                    else:
+                        side = "LONG"
+                        
+                    closed_size = pos.get("closed_size")
+                    if closed_size is None:
+                        closed_size = pos.get("size")
+                    if closed_size is None:
+                        closed_size = 0.0
+                        
+                    rpnl = pos.get("realized_pnl")
+                    if rpnl is None:
+                        rpnl = pos.get("rpnl")
+                    if rpnl is None:
+                        rpnl = pos.get("pnl")
+                    if rpnl is None:
+                        rpnl = 0.0
+                        
+                    closed_at = pos.get("closed_at")
+                    closed_at_str = ""
+                    closed_at_raw = 0
+                    if closed_at:
+                        try:
+                            t_val = float(closed_at)
+                            if t_val > 1e12:
+                                t_val = t_val / 1000.0
+                            if t_val > 1e11:
+                                t_val = t_val / 1000.0
+                            closed_at_raw = t_val
+                            
+                            dt = datetime.datetime.fromtimestamp(t_val, datetime.timezone.utc)
+                            closed_at_str = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                        except Exception:
+                            closed_at_str = str(closed_at)
+
+                    # Determine contract value
+                    contract_val_str = prod_info.get("contract_value") or "0.01"
+                    try:
+                        contract_value = float(contract_val_str)
+                    except ValueError:
+                        contract_value = 0.01
+
+                    # Retrieve actual commission fee or calculate 0.05% taker fee round-trip fallback
+                    realized_fee_val = pos.get("fee") or pos.get("realized_fee") or pos.get("commission")
+                    if realized_fee_val is not None:
+                        try:
+                            fees = abs(float(realized_fee_val))
+                        except (ValueError, TypeError):
+                            fees = 0.0
+                    else:
+                        entry_px = float(pos.get("entry_price") or pos.get("avg_entry_price") or 0)
+                        exit_px = float(pos.get("close_price") or pos.get("exit_price") or pos.get("avg_exit_price") or 0)
+                        c_size = abs(float(closed_size))
+                        entry_notional = entry_px * c_size * contract_value
+                        exit_notional = exit_px * c_size * contract_value
+                        fees = (entry_notional + exit_notional) * 0.0005
+
+                    net_pnl = float(rpnl) - fees
+                    
+                    closed_positions.append({
+                        "closed_at": closed_at_str,
+                        "closed_at_raw": closed_at_raw,
+                        "account_name": account.name,
+                        "symbol": symbol,
+                        "side": side,
+                        "closed_size": abs(float(closed_size)),
+                        "entry_price": float(pos.get("entry_price") or pos.get("avg_entry_price") or 0),
+                        "close_price": float(pos.get("close_price") or pos.get("exit_price") or pos.get("avg_exit_price") or 0),
+                        "realized_pnl": float(rpnl),
+                        "fees": fees,
+                        "net_pnl": net_pnl
+                    })
+            except Exception as e:
+                logger.exception(f"Error fetching closed positions for CSV export on account {account.name}: {e}")
+                
+        # Sort chronologically by timestamp descending
+        closed_positions.sort(key=lambda x: x.get("closed_at_raw", 0), reverse=True)
+        
+        # Build CSV file
+        si = io.StringIO()
+        cw = csv.writer(si)
+        
+        # CSV Headers
+        cw.writerow([
+            "Closed Time (UTC)",
+            "Account Name",
+            "Symbol",
+            "Side",
+            "Closed Size (Contracts)",
+            "Entry Price (USD)",
+            "Exit Price (USD)",
+            "Gross PnL (USD)",
+            "Fees & Commission (USD)",
+            "Net PnL (USD)"
+        ])
+        
+        for pos in closed_positions:
+            cw.writerow([
+                pos["closed_at"],
+                pos["account_name"],
+                pos["symbol"],
+                pos["side"],
+                pos["closed_size"],
+                f"{pos['entry_price']:.4f}",
+                f"{pos['close_price']:.4f}",
+                f"{pos['realized_pnl']:.4f}",
+                f"{pos['fees']:.4f}",
+                f"{pos['net_pnl']:.4f}"
+            ])
+            
+        output = make_response(si.getvalue())
+        output.headers["Content-Disposition"] = "attachment; filename=trading_journal.csv"
+        output.headers["Content-type"] = "text/csv"
+        return output
+        
+    except Exception as e:
+        logger.exception(f"Error exporting trade journal: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
