@@ -432,7 +432,7 @@ def get_pnl():
                     api_secret=account.api_secret,
                     base_url=Config.BASE_URL
                 )
-                closed = client.get_closed_positions(limit=50)
+                closed = client.get_closed_positions(limit=150)
                 for pos in closed:
                     product_id = pos.get("product_id")
                     prod_info = product_map.get(product_id) or pos.get("product") or {}

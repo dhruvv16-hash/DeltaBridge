@@ -700,6 +700,16 @@
                         </tbody>
                     </table>
                 </div>
+                <!-- Pagination & Toggle controls -->
+                <div id="closed-positions-controls" style="display: none; justify-content: space-between; align-items: center; padding: 1rem; border-top: 1px solid var(--border-color); font-size: 0.85rem; color: var(--text-secondary); margin-top: 1rem;">
+                    <div>
+                        <button id="btn-toggle-expand" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer;" onclick="toggleExpandClosedPositions()">
+                            <span id="expand-text">Show All History</span>
+                            <span id="expand-arrow">▼</span>
+                        </button>
+                    </div>
+                    <div id="closed-positions-pagination" style="display: none; align-items: center; gap: 0.35rem;"></div>
+                </div>
             </div>
         </section>
     </main>
@@ -1181,6 +1191,152 @@
             showToast('Exporting trade journal (CSV)...');
         }
 
+        // Global variables for Closed Positions pagination
+        window.closedPositionsCache = [];
+        window.isClosedPositionsExpanded = false;
+        window.closedPositionsCurrentPage = 1;
+        const closedPositionsPageSize = 20;
+
+        function renderClosedPositionsTable() {
+            const closedContainer = document.getElementById('closed-positions-list');
+            const controlsContainer = document.getElementById('closed-positions-controls');
+            const paginationContainer = document.getElementById('closed-positions-pagination');
+            
+            if (!window.closedPositionsCache || window.closedPositionsCache.length === 0) {
+                closedContainer.innerHTML = `
+                    <tr>
+                        <td colspan="10" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                            No closed trade history found.
+                        </td>
+                    </tr>
+                `;
+                controlsContainer.style.display = 'none';
+                return;
+            }
+
+            // Only show controls if there are more than 5 trades
+            if (window.closedPositionsCache.length <= 5) {
+                controlsContainer.style.display = 'none';
+            } else {
+                controlsContainer.style.display = 'flex';
+            }
+
+            closedContainer.innerHTML = '';
+
+            let displayPositions = [];
+            if (!window.isClosedPositionsExpanded) {
+                displayPositions = window.closedPositionsCache.slice(0, 5);
+                document.getElementById('expand-text').innerText = `Show All History (${window.closedPositionsCache.length} trades)`;
+                document.getElementById('expand-arrow').innerText = '▼';
+                paginationContainer.style.display = 'none';
+            } else {
+                const startIdx = (window.closedPositionsCurrentPage - 1) * closedPositionsPageSize;
+                const endIdx = startIdx + closedPositionsPageSize;
+                displayPositions = window.closedPositionsCache.slice(startIdx, endIdx);
+                document.getElementById('expand-text').innerText = 'Collapse';
+                document.getElementById('expand-arrow').innerText = '▲';
+                
+                renderClosedPositionsPagination();
+            }
+
+            displayPositions.forEach(pos => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid var(--border-color)';
+                
+                const pnlVal = parseFloat(pos.realized_pnl);
+                const feesVal = parseFloat(pos.fees || 0);
+                const netPnlVal = parseFloat(pos.net_pnl || pnlVal);
+                
+                const pnlColor = pnlVal > 0 ? 'var(--success)' : (pnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                const pnlPrefix = pnlVal > 0 ? '+' : '';
+                
+                const netPnlColor = netPnlVal > 0 ? 'var(--success)' : (netPnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                const netPnlPrefix = netPnlVal > 0 ? '+' : '';
+                
+                const sideBadge = pos.side === 'LONG' ? 
+                    `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
+                    `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
+                
+                row.innerHTML = `
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${pos.closed_at || '--'}</td>
+                    <td style="padding: 1rem; font-weight: 500;">${pos.account_name}</td>
+                    <td style="padding: 1rem; font-weight: 500;">${pos.symbol}</td>
+                    <td style="padding: 1rem;">${sideBadge}</td>
+                    <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.closed_size}</td>
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.close_price.toFixed(2)}</td>
+                    <td style="padding: 1rem; font-weight: 500; color: ${pnlColor}; font-size: 0.9rem;">
+                        ${pnlPrefix}${pnlVal.toFixed(4)}
+                    </td>
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${feesVal.toFixed(4)}</td>
+                    <td style="padding: 1rem; font-weight: 600; color: ${netPnlColor}; font-size: 0.9rem;">
+                        ${netPnlPrefix}${netPnlVal.toFixed(4)}
+                    </td>
+                `;
+                closedContainer.appendChild(row);
+            });
+        }
+
+        function toggleExpandClosedPositions() {
+            window.isClosedPositionsExpanded = !window.isClosedPositionsExpanded;
+            window.closedPositionsCurrentPage = 1; // reset to first page on toggle
+            renderClosedPositionsTable();
+        }
+
+        function renderClosedPositionsPagination() {
+            const paginationContainer = document.getElementById('closed-positions-pagination');
+            paginationContainer.style.display = 'flex';
+            paginationContainer.innerHTML = '';
+
+            const totalPages = Math.ceil(window.closedPositionsCache.length / closedPositionsPageSize);
+            if (totalPages <= 1) {
+                paginationContainer.style.display = 'none';
+                return;
+            }
+
+            // Prev button
+            const prevBtn = document.createElement('button');
+            prevBtn.className = 'btn btn-secondary btn-sm';
+            prevBtn.style.padding = '0.25rem 0.5rem';
+            prevBtn.innerText = '←';
+            prevBtn.disabled = window.closedPositionsCurrentPage === 1;
+            prevBtn.onclick = () => {
+                if (window.closedPositionsCurrentPage > 1) {
+                    window.closedPositionsCurrentPage--;
+                    renderClosedPositionsTable();
+                }
+            };
+            paginationContainer.appendChild(prevBtn);
+
+            // Page numbers
+            for (let i = 1; i <= totalPages; i++) {
+                const pageBtn = document.createElement('button');
+                pageBtn.className = i === window.closedPositionsCurrentPage ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+                pageBtn.style.padding = '0.25rem 0.6rem';
+                pageBtn.style.minWidth = '2rem';
+                pageBtn.innerText = i;
+                pageBtn.onclick = () => {
+                    window.closedPositionsCurrentPage = i;
+                    renderClosedPositionsTable();
+                };
+                paginationContainer.appendChild(pageBtn);
+            }
+
+            // Next button
+            const nextBtn = document.createElement('button');
+            nextBtn.className = 'btn btn-secondary btn-sm';
+            nextBtn.style.padding = '0.25rem 0.5rem';
+            nextBtn.innerText = '→';
+            nextBtn.disabled = window.closedPositionsCurrentPage === totalPages;
+            nextBtn.onclick = () => {
+                if (window.closedPositionsCurrentPage < totalPages) {
+                    window.closedPositionsCurrentPage++;
+                    renderClosedPositionsTable();
+                }
+            };
+            paginationContainer.appendChild(nextBtn);
+        }
+
         // Fetch Open & Closed Positions and PnL
         async function fetchPnL() {
             try {
@@ -1228,54 +1384,8 @@
                 }
                 
                 // 2. Render Closed Positions
-                const closedContainer = document.getElementById('closed-positions-list');
-                const closedPositions = data.closed || [];
-                
-                if (closedPositions.length === 0) {
-                    closedContainer.innerHTML = `
-                        <tr>
-                            <td colspan="10" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
-                                No closed trade history found.
-                            </td>
-                        </tr>
-                    `;
-                } else {
-                    closedContainer.innerHTML = '';
-                    closedPositions.forEach(pos => {
-                        const row = document.createElement('tr');
-                        const pnlVal = parseFloat(pos.realized_pnl);
-                        const feesVal = parseFloat(pos.fees || 0);
-                        const netPnlVal = parseFloat(pos.net_pnl || pnlVal);
-                        
-                        const pnlColor = pnlVal > 0 ? 'var(--success)' : (pnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
-                        const pnlPrefix = pnlVal > 0 ? '+' : '';
-                        
-                        const netPnlColor = netPnlVal > 0 ? 'var(--success)' : (netPnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
-                        const netPnlPrefix = netPnlVal > 0 ? '+' : '';
-                        
-                        const sideBadge = pos.side === 'LONG' ? 
-                            `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
-                            `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
-                        
-                        row.innerHTML = `
-                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${pos.closed_at || '--'}</td>
-                            <td style="padding: 1rem; font-weight: 500;">${pos.account_name}</td>
-                            <td style="padding: 1rem; font-weight: 500;">${pos.symbol}</td>
-                            <td style="padding: 1rem;">${sideBadge}</td>
-                            <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.closed_size}</td>
-                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
-                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.close_price.toFixed(2)}</td>
-                            <td style="padding: 1rem; font-weight: 500; color: ${pnlColor}; font-size: 0.9rem;">
-                                ${pnlPrefix}${pnlVal.toFixed(4)}
-                            </td>
-                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${feesVal.toFixed(4)}</td>
-                            <td style="padding: 1rem; font-weight: 600; color: ${netPnlColor}; font-size: 0.9rem;">
-                                ${netPnlPrefix}${netPnlVal.toFixed(4)}
-                            </td>
-                        `;
-                        closedContainer.appendChild(row);
-                    });
-                }
+                window.closedPositionsCache = data.closed || [];
+                renderClosedPositionsTable();
             } catch (err) {
                 console.error("Failed to load PnL data:", err);
             }
