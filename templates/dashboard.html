@@ -1,0 +1,2147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delta Bot Admin Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <style>
+        :root {
+            --bg-color: #0b0b0f;
+            --card-bg: rgba(20, 20, 25, 0.7);
+            --border-color: rgba(255, 255, 255, 0.07);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0ab;
+            --accent-primary: #8b5cf6;
+            --accent-hover: #7c3aed;
+            --accent-glow: rgba(139, 92, 246, 0.25);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.2);
+            --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.2);
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            overflow-x: hidden;
+        }
+
+        /* Sidebar navigation styling */
+        aside {
+            width: 260px;
+            background-color: rgba(10, 10, 12, 0.95);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 2rem 1.5rem;
+            position: fixed;
+            height: 100vh;
+            z-index: 10;
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 3rem;
+        }
+
+        .logo-container h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.025em;
+        }
+
+        .nav-links {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .nav-links li a {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .nav-links li a:hover, .nav-links li.active a {
+            color: var(--text-primary);
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        .nav-links li.active a {
+            border-left: 3px solid var(--accent-primary);
+            border-radius: 0 8px 8px 0;
+            padding-left: calc(1rem - 3px);
+            background-color: rgba(139, 92, 246, 0.08);
+        }
+
+        /* Main Content Container */
+        main {
+            margin-left: 260px;
+            flex-grow: 1;
+            padding: 2.5rem 3rem;
+            max-width: 1200px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+        }
+
+        header h2 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        /* Tabs Panels */
+        .tab-panel {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Cards and Elements with glassmorphism */
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        .card-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Form Controls */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        input[type="text"], input[type="password"], input[type="number"], select {
+            background-color: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.95rem;
+            transition: var(--transition);
+        }
+
+        input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus, select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        /* Buttons styling */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition);
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background-color: var(--accent-primary);
+            color: var(--text-primary);
+            box-shadow: 0 4px 14px 0 var(--accent-glow);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background-color: rgba(255, 255, 255, 0.08);
+        }
+
+        .btn-danger {
+            background-color: var(--danger);
+            color: var(--text-primary);
+            box-shadow: 0 4px 14px 0 var(--danger-glow);
+        }
+
+        .btn-danger:hover {
+            background-color: #dc2626;
+        }
+
+        .btn-sm {
+            padding: 0.5rem 1rem;
+            font-size: 0.8rem;
+        }
+
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: var(--transition);
+            border-radius: 24px;
+            border: 1px solid var(--border-color);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: var(--transition);
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--success);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Accounts List Table/Grid */
+        .accounts-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .account-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 1.5rem;
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            transition: var(--transition);
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .account-row:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background-color: rgba(255, 255, 255, 0.04);
+        }
+
+        .account-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            flex: 1;
+            min-width: 280px;
+        }
+
+        .account-name {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .account-details {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .account-details span b {
+            color: var(--text-primary);
+        }
+
+        .account-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        /* Balance badge styling */
+        .balance-badge {
+            background-color: rgba(139, 92, 246, 0.12);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+        }
+
+        .balance-badge.success {
+            background-color: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+
+        /* Notifications / Toast styling */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background-color: #18181b;
+            border: 1px solid var(--border-color);
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            z-index: 100;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: var(--transition);
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .toast-success .toast-icon {
+            background-color: var(--success);
+            color: var(--bg-color);
+        }
+
+        .toast-error .toast-icon {
+            background-color: var(--danger);
+            color: var(--text-primary);
+        }
+
+        /* Trade Logs and Email Integration Tab Styles */
+        table th, table td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-success {
+            background-color: rgba(16, 185, 129, 0.12);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .status-failed {
+            background-color: rgba(239, 68, 68, 0.12);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        .status-partial {
+            background-color: rgba(245, 158, 11, 0.12);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+        .status-verified {
+            background-color: rgba(139, 92, 246, 0.12);
+            color: var(--accent-primary);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+        }
+        .status-ignored {
+            background-color: rgba(160, 160, 171, 0.12);
+            color: var(--text-secondary);
+            border: 1px solid rgba(160, 160, 171, 0.2);
+        }
+        .log-details-text {
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 0.8rem;
+            max-width: 350px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar navigation -->
+    <aside>
+        <div class="logo-container">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L2 22H22L12 2Z" stroke="#8b5cf6" stroke-width="2" stroke-linejoin="round"/>
+                <path d="M12 6L5 20H19L12 6Z" fill="#8b5cf6" fill-opacity="0.3"/>
+            </svg>
+            <h1>Delta Bot</h1>
+        </div>
+        <ul class="nav-links">
+            <li class="active" data-tab="accounts-tab"><a href="#accounts">Accounts</a></li>
+            <li data-tab="pnl-tab"><a href="#pnl">Trades & PnL</a></li>
+            <li data-tab="analytics-tab"><a href="#analytics">Performance Analytics</a></li>
+            <li data-tab="logs-tab"><a href="#logs">Trade Logs</a></li>
+            <li data-tab="email-tab"><a href="#email">Email Verification</a></li>
+            <li data-tab="playground-tab"><a href="#playground">Alert Playground</a></li>
+            <li data-tab="settings-tab"><a href="#settings">Global Settings</a></li>
+        </ul>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main>
+        <header>
+            <h2 id="page-title">Accounts Management</h2>
+            <div id="latency-indicator" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-secondary);">
+                <span id="latency-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--text-secondary); display: inline-block; box-shadow: 0 0 8px var(--text-secondary);"></span>
+                <span id="latency-text">API Latency: -- ms</span>
+            </div>
+        </header>
+
+        <!-- ACCOUNTS TAB PANEL -->
+        <section id="accounts-tab" class="tab-panel active">
+            <!-- Add Account Form -->
+            <div class="card">
+                <div class="card-title">Add New Delta Account</div>
+                <form id="add-account-form">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="name">Friendly Name</label>
+                            <input type="text" id="name" placeholder="e.g. Main Account" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="api-key">API Key</label>
+                            <input type="text" id="api-key" placeholder="Enter API Key" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="api-secret">API Secret</label>
+                            <input type="password" id="api-secret" placeholder="Enter API Secret Key" required>
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="leverage">Default Leverage (1x - 100x)</label>
+                            <input type="number" id="leverage" value="50" min="1" max="100" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="sizing-type">Sizing Mode</label>
+                            <select id="sizing-type" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.9rem; outline: none; transition: var(--transition);">
+                                <option value="percentage">Percentage of Balance</option>
+                                <option value="fixed">Fixed Margin per Trade</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="buffer-group">
+                            <label for="buffer">Trade Amount Allocation %</label>
+                            <input type="number" id="buffer" value="55" min="1" max="100" required>
+                        </div>
+                        <div class="form-group" id="fixed-amount-group" style="display: none;">
+                            <label for="fixed-amount">Fixed Margin Amount (USDT/USDC)</label>
+                            <input type="number" id="fixed-amount" value="10" min="0.001" step="any" required>
+                        </div>
+                        <div class="form-group" id="daily-loss-limit-group">
+                            <label for="daily-loss-limit">Daily Loss Limit (USD, optional)</label>
+                            <input type="number" id="daily-loss-limit" placeholder="No Limit" min="0.01" step="any">
+                        </div>
+                        <div class="form-group" style="justify-content: flex-end; padding-top: 1.5rem;">
+                            <button type="submit" class="btn btn-primary">Add Account</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Active Accounts List -->
+            <div class="card">
+                <div class="card-title">Configured Accounts</div>
+                <div class="accounts-grid" id="accounts-list">
+                    <!-- Accounts rows loaded dynamically via JS -->
+                    <div class="account-row" style="justify-content: center; color: var(--text-secondary);">
+                        Loading configured accounts...
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TRADE LOGS TAB PANEL -->
+        <section id="logs-tab" class="tab-panel">
+            <div class="card">
+                <div class="card-title">
+                    <span>Audit Execution Logs</span>
+                    <button class="btn btn-secondary btn-sm" onclick="fetchLogs()">Refresh Logs</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--border-color); color: var(--text-secondary); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">
+                                <th style="padding: 1rem;">Timestamp</th>
+                                <th style="padding: 1rem;">Ticker</th>
+                                <th style="padding: 1rem;">Action</th>
+                                <th style="padding: 1rem;">Source</th>
+                                <th style="padding: 1rem;">Status</th>
+                                <th style="padding: 1rem;">Execution Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-list">
+                            <tr style="color: var(--text-secondary);"><td colspan="6" style="padding: 2rem; text-align: center;">Loading logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- EMAIL INTEGRATION TAB PANEL -->
+        <section id="email-tab" class="tab-panel">
+            <div class="card">
+                <div class="card-title">TradingView Email Integration & Verification</div>
+                <form id="email-settings-form">
+                    <div style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+                        <label class="switch">
+                            <input type="checkbox" id="email-enabled">
+                            <span class="slider"></span>
+                        </label>
+                        <span style="font-weight: 500;">Enable Email Double-Verification & Fallback Executor</span>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="imap-host">IMAP Server Host</label>
+                            <input type="text" id="imap-host" value="imap.gmail.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="imap-port">IMAP Server Port</label>
+                            <input type="number" id="imap-port" value="993" required>
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="email-address">Email Address</label>
+                            <input type="text" id="email-address" placeholder="yourname@gmail.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email-password">App Password</label>
+                            <input type="password" id="email-password" placeholder="Enter Gmail App Password" required>
+                            <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                Note: For Gmail, use a 16-character App Password (not your primary password).
+                            </span>
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="email-sender">Sender Email Filter</label>
+                            <input type="text" id="email-sender" value="noreply@tradingview.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email-subject">Subject Keyword Filter</label>
+                            <input type="text" id="email-subject" value="TradingView Alert" required>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                        <button type="submit" class="btn btn-primary">Save Email Settings</button>
+                        <button type="button" id="test-email-btn" class="btn btn-secondary">Test Connection</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- GLOBAL CONFIGURATION TAB PANEL -->
+        <section id="settings-tab" class="tab-panel">
+            <div class="card">
+                <div class="card-title">Global Webhook Authentication</div>
+                <div class="form-grid" style="grid-template-columns: 1fr;">
+                    <div class="form-group">
+                        <label for="passphrase">Security Passphrase</label>
+                        <input type="text" id="passphrase" placeholder="Enter Webhook Passphrase" style="max-width: 400px;">
+                        <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                            This passphrase must match the payload passphrase sent in your TradingView webhook.
+                        </span>
+                    </div>
+                    <div class="form-group" style="margin-top: 1rem;">
+                        <button id="save-settings-btn" class="btn btn-primary" style="max-width: 200px;">Save Passphrase</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notification Channels Card -->
+            <div class="card" style="margin-top: 2rem;">
+                <div class="card-title">Real-Time Alert Channels</div>
+                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem;">
+                    <!-- Telegram Form Block -->
+                    <div style="border-right: 1px solid var(--border-color); padding-right: 2rem; display: flex; flex-direction: column; gap: 1.25rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Telegram Bot Alerts</span>
+                            <label class="switch">
+                                <input type="checkbox" id="telegram-enabled-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="telegram-token">Telegram Bot Token</label>
+                            <input type="password" id="telegram-token" placeholder="Enter Bot API Token">
+                        </div>
+                        <div class="form-group">
+                            <label for="telegram-chat-id">Telegram Chat ID</label>
+                            <input type="text" id="telegram-chat-id" placeholder="Enter Chat ID (e.g. -100...)">
+                        </div>
+                    </div>
+                    
+                    <!-- Discord Form Block -->
+                    <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Discord Webhook Alerts</span>
+                            <label class="switch">
+                                <input type="checkbox" id="discord-enabled-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="discord-webhook-url">Discord Webhook URL</label>
+                            <input type="password" id="discord-webhook-url" placeholder="Enter Webhook URL">
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 2rem; display: flex; gap: 1rem;">
+                    <button id="save-notifications-btn" class="btn btn-primary" onclick="saveNotificationSettings()">Save Alert Channels</button>
+                    <button id="test-notifications-btn" class="btn btn-secondary" onclick="testNotifications()">Send Test Alert</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- PERFORMANCE ANALYTICS TAB PANEL -->
+        <section id="analytics-tab" class="tab-panel">
+            <!-- Analytics KPI Grid -->
+            <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Net Profit</div>
+                    <div id="metric-net-profit" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">$0.00</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Win Rate</div>
+                    <div id="metric-win-rate" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0%</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Profit Factor</div>
+                    <div id="metric-profit-factor" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Sharpe Ratio</div>
+                    <div id="metric-sharpe-ratio" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Recovery Factor</div>
+                    <div id="metric-recovery-factor" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Total Trades</div>
+                    <div id="metric-total-trades" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0</div>
+                </div>
+            </div>
+
+            <!-- Charts Cards Grid -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 2rem; margin-bottom: 2rem;">
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-title">Cumulative Portfolio Equity Curve</div>
+                    <div id="chart-equity" style="min-height: 350px;"></div>
+                </div>
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-title">Historical Peak Drawdowns (%)</div>
+                    <div id="chart-drawdown" style="min-height: 350px;"></div>
+                </div>
+            </div>
+
+            <!-- Time-of-day Heatmap Card -->
+            <div class="card">
+                <div class="card-title">Time-of-Day Profitability Heatmap (Net PnL)</div>
+                <div id="chart-heatmap" style="min-height: 380px;"></div>
+            </div>
+        </section>
+
+        <!-- PLAYGROUND TAB PANEL -->
+        <section id="playground-tab" class="tab-panel">
+            <div class="card">
+                <div class="card-title">TradingView Webhook Playground</div>
+                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2.5rem;">
+                    <!-- Alert Builder Form -->
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Alert Signal Generator</span>
+                        
+                        <div class="form-group">
+                            <label for="play-ticker">Ticker / Symbol</label>
+                            <select id="play-ticker" onchange="generatePlayload()" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.9rem;">
+                                <option value="ETHUSD.P">ETHUSD.P (Ether Perpetual)</option>
+                                <option value="BTCUSD.P">BTCUSD.P (Bitcoin Perpetual)</option>
+                                <option value="SOLUSD.P">SOLUSD.P (Solana Perpetual)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="play-action">Action</label>
+                            <select id="play-action" onchange="generatePlayload()" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.9rem;">
+                                <option value="buy">BUY (Open/Increase LONG or close SHORT)</option>
+                                <option value="sell">SELL (Open/Increase SHORT or close LONG)</option>
+                                <option value="close_long">CLOSE LONG (Reduce-only Long exit)</option>
+                                <option value="close_short">CLOSE SHORT (Reduce-only Short exit)</option>
+                            </select>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Override Account Sizing (Custom Qty)</span>
+                            <label class="switch">
+                                <input type="checkbox" id="play-qty-override" onchange="togglePlayQtyOverride()">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="form-group" id="play-qty-group" style="display: none;">
+                            <label for="play-qty">Custom Trade Size (in Base Asset, e.g. 0.25 ETH)</label>
+                            <input type="number" id="play-qty" value="0.1" min="0.0001" step="any" oninput="generatePlayload()">
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                            <div>
+                                <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block;">Execute Live Order</span>
+                                <span style="font-size: 0.75rem; color: var(--danger); display: block; margin-top: 0.25rem;">Warning: Submits real order to exchange!</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="play-live-execute" onchange="updateSimulateButtonText()">
+                                <span class="slider" style="border-color: rgba(239, 68, 68, 0.4);"></span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- Sandbox Output / Generated Code -->
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Webhook Payload JSON</span>
+                        
+                        <div style="position: relative;">
+                            <pre id="play-payload-box" style="background-color: rgba(0,0,0,0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; font-family: monospace; font-size: 0.85rem; color: #a78bfa; overflow-x: auto; min-height: 120px;"></pre>
+                            <button class="btn btn-secondary btn-sm" style="position: absolute; right: 10px; top: 10px; padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="copyPlayload()">Copy</button>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <button id="trigger-sandbox-btn" class="btn btn-primary" onclick="triggerSandbox()">Run Simulation</button>
+                        </div>
+
+                        <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600; margin-top: 1rem;">Simulation Logs Console</span>
+                        <div id="sandbox-console" style="background-color: #050508; border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; font-family: monospace; font-size: 0.85rem; color: var(--text-secondary); min-height: 150px; max-height: 250px; overflow-y: auto; white-space: pre-wrap; box-shadow: inset 0 2px 8px rgba(0,0,0,0.8); line-height: 1.4;">Waiting for webhook simulation trigger...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TRADES & PNL TAB PANEL -->
+        <section id="pnl-tab" class="tab-panel">
+            <!-- Open Positions Card -->
+            <div class="card" style="margin-bottom: 2rem;">
+                <div class="card-title">
+                    <span>Live Open Positions</span>
+                    <button class="btn btn-secondary btn-sm" onclick="fetchPnL()">Refresh Positions</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--border-color); color: var(--text-secondary); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">
+                                <th style="padding: 1rem;">Account</th>
+                                <th style="padding: 1rem;">Ticker</th>
+                                <th style="padding: 1rem;">Side</th>
+                                <th style="padding: 1rem;">Size</th>
+                                <th style="padding: 1rem;">Entry Price</th>
+                                <th style="padding: 1rem;">Mark Price</th>
+                                <th style="padding: 1rem;">Margin</th>
+                                <th style="padding: 1rem;">Leverage</th>
+                                <th style="padding: 1rem;">Unrealized PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="open-positions-list">
+                            <tr style="color: var(--text-secondary);"><td colspan="9" style="padding: 2rem; text-align: center;">Loading open positions...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Closed Position History Card -->
+            <div class="card">
+                <div class="card-title">
+                    <span>Closed Position History</span>
+                    <button class="btn btn-secondary btn-sm" onclick="exportJournal()">Export Trade Journal (CSV)</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--border-color); color: var(--text-secondary); text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">
+                                <th style="padding: 1rem;">Closed Time</th>
+                                <th style="padding: 1rem;">Account</th>
+                                <th style="padding: 1rem;">Ticker</th>
+                                <th style="padding: 1rem;">Side</th>
+                                <th style="padding: 1rem;">Closed Size</th>
+                                <th style="padding: 1rem;">Entry Price</th>
+                                <th style="padding: 1rem;">Exit Price</th>
+                                <th style="padding: 1rem;">Gross PnL</th>
+                                <th style="padding: 1rem;">Fees</th>
+                                <th style="padding: 1rem;">Net PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="closed-positions-list">
+                            <tr style="color: var(--text-secondary);"><td colspan="10" style="padding: 2rem; text-align: center;">Loading closed position history...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Pagination & Toggle controls -->
+                <div id="closed-positions-controls" style="display: none; justify-content: space-between; align-items: center; padding: 1rem; border-top: 1px solid var(--border-color); font-size: 0.85rem; color: var(--text-secondary); margin-top: 1rem;">
+                    <div>
+                        <button id="btn-toggle-expand" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer;" onclick="toggleExpandClosedPositions()">
+                            <span id="expand-text">Show All History</span>
+                            <span id="expand-arrow">▼</span>
+                        </button>
+                    </div>
+                    <div id="closed-positions-pagination" style="display: none; align-items: center; gap: 0.35rem;"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Toast Notification system -->
+    <div id="toast" class="toast">
+        <div class="toast-icon">✓</div>
+        <div id="toast-message">Operation successful!</div>
+    </div>
+
+    <!-- Frontend logic -->
+    <script>
+        // Tab switching logic
+        document.querySelectorAll('.nav-links li').forEach(item => {
+            item.addEventListener('click', function(e) {
+                document.querySelectorAll('.nav-links li').forEach(li => li.classList.remove('active'));
+                this.classList.add('active');
+                
+                const tabId = this.getAttribute('data-tab');
+                document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+                document.getElementById(tabId).classList.add('active');
+                
+                // Update title
+                document.getElementById('page-title').innerText = this.innerText;
+                
+                if (tabId === 'pnl-tab') {
+                    fetchPnL();
+                } else if (tabId === 'logs-tab') {
+                    fetchLogs();
+                } else if (tabId === 'accounts-tab') {
+                    fetchAccounts();
+                } else if (tabId === 'playground-tab') {
+                    generatePlayload();
+                } else if (tabId === 'analytics-tab') {
+                    fetchAnalytics();
+                }
+            });
+        });
+
+        // Toast Notification Trigger
+        function showToast(message, isSuccess = true) {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            
+            toast.className = 'toast ' + (isSuccess ? 'toast-success' : 'toast-error');
+            toast.querySelector('.toast-icon').innerText = isSuccess ? '✓' : '✗';
+            toastMessage.innerText = message;
+            
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Fetch configured accounts
+        async function fetchAccounts() {
+            try {
+                const response = await fetch('/api/accounts');
+                const accounts = await response.json();
+                
+                const listContainer = document.getElementById('accounts-list');
+                if (accounts.length === 0) {
+                    listContainer.innerHTML = `
+                        <div class="account-row" style="justify-content: center; color: var(--text-secondary); padding: 2rem;">
+                            No accounts configured. Fill out the form above to add a Delta account.
+                        </div>
+                    `;
+                    return;
+                }
+                
+                listContainer.innerHTML = '';
+                accounts.forEach(acc => {
+                    const row = document.createElement('div');
+                    row.className = 'account-row';
+                    row.id = `row-${acc.id}`;
+                    
+                    const sizingLabel = acc.sizing_type === 'fixed' ? 'Fixed Margin' : 'Allocation';
+                    const sizingValue = acc.sizing_type === 'fixed' ? `$${acc.fixed_amount.toFixed(2)}` : `${acc.balance_buffer_pct}%`;
+                    const lossLimitText = acc.daily_loss_limit ? `$${acc.daily_loss_limit.toFixed(2)}` : 'No Limit';
+                    const apiKeyDisplay = acc.api_key.length > 12 ? acc.api_key.substring(0, 6) + '...' + acc.api_key.substring(acc.api_key.length - 4) : acc.api_key;
+                    
+                    let breakerBadge = '';
+                    let resetBreakerBtn = '';
+                    if (acc.is_circuit_broken) {
+                        breakerBadge = `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.15); color: var(--danger); font-weight: 700; margin-left: 0.5rem; text-transform: uppercase;">CIRCUIT BROKEN - HALTED</span>`;
+                        resetBreakerBtn = `<button class="btn btn-danger btn-sm" onclick="resetBreaker(${acc.id})" style="background-color: #ef4444; border-color: #ef4444;">Reset Breaker</button>`;
+                    }
+                    
+                    row.innerHTML = `
+                        <div class="account-info">
+                            <div class="account-name" style="display: flex; align-items: center; gap: 0.5rem;">${acc.name}${breakerBadge}</div>
+                            <div class="account-details">
+                                <span>API Key: <b>${apiKeyDisplay}</b></span>
+                                <span>Leverage: <b>${acc.leverage}x</b></span>
+                                <span>Trade Size: <b>${sizingValue} (${sizingLabel})</b></span>
+                                <span>Loss Limit: <b>${lossLimitText}</b></span>
+                            </div>
+                        </div>
+                        <div class="account-actions">
+                            <span class="balance-badge" id="balance-${acc.id}">Balance: --</span>
+                            <button class="btn btn-secondary btn-sm" onclick="checkBalance(${acc.id})">Check Balance</button>
+                            ${resetBreakerBtn}
+                            <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct}, '${acc.sizing_type}', ${acc.fixed_amount}, ${acc.daily_loss_limit})">Edit</button>
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-right: 0.5rem; margin-left: 0.5rem;">
+                                <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Local Strategy</span>
+                                <label class="switch">
+                                    <input type="checkbox" ${acc.local_strategy_enabled ? 'checked' : ''} onchange="toggleStrategy(${acc.id}, this.checked)">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-right: 0.5rem;">
+                                <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Active</span>
+                                <label class="switch">
+                                    <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <button class="btn btn-danger btn-sm" onclick="deleteAccount(${acc.id})">Delete</button>
+                        </div>
+                    `;
+                    listContainer.appendChild(row);
+                });
+            } catch (err) {
+                console.error("Failed to load accounts:", err);
+                showToast("Failed to load configured accounts", false);
+            }
+        }
+
+        // Fetch global settings (passphrase and notifications)
+        async function fetchSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const settings = await response.json();
+                if (settings.passphrase) {
+                    document.getElementById('passphrase').value = settings.passphrase;
+                }
+                document.getElementById('telegram-enabled-toggle').checked = settings.telegram_enabled === "true";
+                document.getElementById('telegram-token').value = settings.telegram_token || "";
+                document.getElementById('telegram-chat-id').value = settings.telegram_chat_id || "";
+                document.getElementById('discord-enabled-toggle').checked = settings.discord_enabled === "true";
+                document.getElementById('discord-webhook-url').value = settings.discord_webhook_url || "";
+                
+                if (settings.ws_url) {
+                    connectWebSocket(settings.ws_url);
+                }
+            } catch (err) {
+                console.error("Failed to load settings:", err);
+            }
+        }
+
+        // Add account submit
+        document.getElementById('sizing-type').addEventListener('change', function() {
+            const isFixed = this.value === 'fixed';
+            document.getElementById('buffer-group').style.display = isFixed ? 'none' : 'block';
+            document.getElementById('fixed-amount-group').style.display = isFixed ? 'block' : 'none';
+        });
+
+        document.getElementById('add-account-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const limitVal = document.getElementById('daily-loss-limit').value;
+            const payload = {
+                name: document.getElementById('name').value,
+                api_key: document.getElementById('api-key').value,
+                api_secret: document.getElementById('api-secret').value,
+                leverage: parseInt(document.getElementById('leverage').value),
+                balance_buffer_pct: parseFloat(document.getElementById('buffer').value),
+                sizing_type: document.getElementById('sizing-type').value,
+                fixed_amount: parseFloat(document.getElementById('fixed-amount').value),
+                daily_loss_limit: limitVal === "" ? null : parseFloat(limitVal)
+            };
+            
+            try {
+                const response = await fetch('/api/accounts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    showToast("Account added successfully!");
+                    document.getElementById('add-account-form').reset();
+                    document.getElementById('leverage').value = "50";
+                    document.getElementById('buffer').value = "55";
+                    document.getElementById('sizing-type').value = "percentage";
+                    document.getElementById('fixed-amount').value = "10";
+                    document.getElementById('daily-loss-limit').value = "";
+                    document.getElementById('buffer-group').style.display = 'block';
+                    document.getElementById('fixed-amount-group').style.display = 'none';
+                    fetchAccounts();
+                } else {
+                    const data = await response.json();
+                    showToast(data.message || "Failed to add account", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        });
+
+        // Save global passphrase
+        document.getElementById('save-settings-btn').addEventListener('click', async function() {
+            const passphrase = document.getElementById('passphrase').value;
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ passphrase })
+                });
+                
+                if (response.ok) {
+                    showToast("Passphrase saved successfully!");
+                } else {
+                    showToast("Failed to save passphrase", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        });
+
+        async function saveNotificationSettings() {
+            const telegram_enabled = document.getElementById('telegram-enabled-toggle').checked ? "true" : "false";
+            const telegram_token = document.getElementById('telegram-token').value;
+            const telegram_chat_id = document.getElementById('telegram-chat-id').value;
+            const discord_enabled = document.getElementById('discord-enabled-toggle').checked ? "true" : "false";
+            const discord_webhook_url = document.getElementById('discord-webhook-url').value;
+            
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        telegram_enabled,
+                        telegram_token,
+                        telegram_chat_id,
+                        discord_enabled,
+                        discord_webhook_url
+                    })
+                });
+                
+                if (response.ok) {
+                    showToast("Notification settings saved successfully!");
+                } else {
+                    showToast("Failed to save settings", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+
+        async function testNotifications() {
+            const btn = document.getElementById('test-notifications-btn');
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = "Sending...";
+            try {
+                // Save settings first to make sure they are current in database
+                const telegram_enabled = document.getElementById('telegram-enabled-toggle').checked ? "true" : "false";
+                const telegram_token = document.getElementById('telegram-token').value;
+                const telegram_chat_id = document.getElementById('telegram-chat-id').value;
+                const discord_enabled = document.getElementById('discord-enabled-toggle').checked ? "true" : "false";
+                const discord_webhook_url = document.getElementById('discord-webhook-url').value;
+                
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        telegram_enabled,
+                        telegram_token,
+                        telegram_chat_id,
+                        discord_enabled,
+                        discord_webhook_url
+                    })
+                });
+
+                const response = await fetch('/api/notifications/test', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    showToast("Test notification dispatched!");
+                } else {
+                    try {
+                        const errData = await response.json();
+                        showToast("Failed: " + errData.message, false);
+                    } catch (e) {
+                        showToast("Failed to send test notification", false);
+                    }
+                }
+            } catch (err) {
+                showToast("Error occurred testing alerts", false);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        }
+
+        // Toggle active status
+        async function toggleAccount(id, is_active) {
+            try {
+                const response = await fetch(`/api/accounts/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active })
+                });
+                
+                if (response.ok) {
+                    showToast(is_active ? "Account enabled" : "Account disabled");
+                } else {
+                    showToast("Failed to update status", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+
+        // Toggle local strategy status
+        async function toggleStrategy(id, enabled) {
+            try {
+                const response = await fetch(`/api/accounts/${id}/toggle-strategy`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                
+                if (response.ok) {
+                    showToast(enabled ? "Local Strategy enabled" : "Local Strategy disabled");
+                } else {
+                    showToast("Failed to update strategy status", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+
+        // Delete account
+        async function deleteAccount(id) {
+            if (!confirm("Are you sure you want to delete this account?")) return;
+            
+            try {
+                const response = await fetch(`/api/accounts/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showToast("Account deleted successfully!");
+                    fetchAccounts();
+                } else {
+                    showToast("Failed to delete account", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+
+        // Get active account balance
+        async function checkBalance(id) {
+            const badge = document.getElementById(`balance-${id}`);
+            badge.className = 'balance-badge';
+            badge.innerText = 'Checking...';
+            
+            try {
+                const response = await fetch(`/api/accounts/${id}/balance`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const balNum = parseFloat(data.balance);
+                    const formattedBalance = isNaN(balNum) ? data.balance : balNum.toFixed(2);
+                    badge.innerText = `${formattedBalance} ${data.asset}`;
+                    badge.classList.add('success');
+                } else {
+                    badge.innerText = 'Error';
+                    showToast(data.message || "Failed to fetch balance", false);
+                }
+            } catch (err) {
+                badge.innerText = 'Error';
+                showToast("Network error occurred", false);
+            }
+        }
+
+        // Inline Account Editing functions
+        function toggleEditSizing(id, value) {
+            const isFixed = value === 'fixed';
+            document.getElementById(`edit-buffer-group-${id}`).style.display = isFixed ? 'none' : 'block';
+            document.getElementById(`edit-fixed-group-${id}`).style.display = isFixed ? 'block' : 'none';
+        }
+
+        function editAccount(id, name, leverage, buffer, sizing_type = 'percentage', fixed_amount = 10.0, daily_loss_limit = null) {
+            const row = document.getElementById(`row-${id}`);
+            if (!row) return;
+            
+            row.dataset.originalHtml = row.innerHTML;
+            
+            const isFixed = sizing_type === 'fixed';
+            const limitVal = (daily_loss_limit !== null && daily_loss_limit !== undefined && daily_loss_limit !== 'null') ? daily_loss_limit : '';
+            
+            row.innerHTML = `
+                <div class="account-info" style="width: 100%;">
+                    <div style="display: flex; gap: 1rem; align-items: center; width: 100%; flex-wrap: wrap; margin-bottom: 1rem;">
+                        <div class="form-group" style="flex: 1; min-width: 120px;">
+                            <label style="font-size: 0.75rem;">Friendly Name</label>
+                            <input type="text" id="edit-name-${id}" value="${name}" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="width: 80px;">
+                            <label style="font-size: 0.75rem;">Leverage</label>
+                            <input type="number" id="edit-leverage-${id}" value="${leverage}" min="1" max="100" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="width: 120px;">
+                            <label style="font-size: 0.75rem;">Sizing Mode</label>
+                            <select id="edit-sizing-type-${id}" style="padding: 0.4rem; font-size: 0.9rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;" onchange="toggleEditSizing(${id}, this.value)">
+                                <option value="percentage" ${sizing_type === 'percentage' ? 'selected' : ''}>Percentage</option>
+                                <option value="fixed" ${sizing_type === 'fixed' ? 'selected' : ''}>Fixed Amount</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="edit-buffer-group-${id}" style="width: 100px; display: ${isFixed ? 'none' : 'block'};">
+                            <label style="font-size: 0.75rem;">Allocation %</label>
+                            <input type="number" id="edit-buffer-${id}" value="${buffer}" min="1" max="100" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" id="edit-fixed-group-${id}" style="width: 100px; display: ${isFixed ? 'block' : 'none'};">
+                            <label style="font-size: 0.75rem;">Margin Amount</label>
+                            <input type="number" id="edit-fixed-amount-${id}" value="${fixed_amount}" min="0.001" step="any" required style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" id="edit-loss-limit-group-${id}" style="width: 100px;">
+                            <label style="font-size: 0.75rem;">Loss Limit (USD)</label>
+                            <input type="number" id="edit-loss-limit-${id}" value="${limitVal}" placeholder="No Limit" min="0.01" step="any" style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="flex: 2; min-width: 180px;">
+                            <label style="font-size: 0.75rem;">API Key</label>
+                            <input type="text" id="edit-api-key-${id}" placeholder="Leave blank to keep current" style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                        <div class="form-group" style="flex: 2; min-width: 180px;">
+                            <label style="font-size: 0.75rem;">API Secret</label>
+                            <input type="password" id="edit-api-secret-${id}" placeholder="Leave blank to keep current" style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; justify-content: flex-end; width: 100%;">
+                        <button class="btn btn-primary btn-sm" onclick="saveAccountEdit(${id})">Save</button>
+                        <button class="btn btn-secondary btn-sm" onclick="cancelAccountEdit(${id})">Cancel</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function saveAccountEdit(id) {
+            const name = document.getElementById(`edit-name-${id}`).value;
+            const leverage = parseInt(document.getElementById(`edit-leverage-${id}`).value);
+            const balance_buffer_pct = parseFloat(document.getElementById(`edit-buffer-${id}`).value);
+            const sizing_type = document.getElementById(`edit-sizing-type-${id}`).value;
+            const fixed_amount = parseFloat(document.getElementById(`edit-fixed-amount-${id}`).value);
+            const loss_limit_val = document.getElementById(`edit-loss-limit-${id}`).value;
+            const api_key = document.getElementById(`edit-api-key-${id}`).value;
+            const api_secret = document.getElementById(`edit-api-secret-${id}`).value;
+            
+            const payload = {
+                name,
+                leverage,
+                balance_buffer_pct,
+                sizing_type,
+                fixed_amount,
+                daily_loss_limit: loss_limit_val === "" ? null : parseFloat(loss_limit_val)
+            };
+            if (api_key) payload.api_key = api_key;
+            if (api_secret) payload.api_secret = api_secret;
+            
+            try {
+                const response = await fetch(`/api/accounts/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    showToast("Account updated successfully!");
+                    fetchAccounts();
+                } else {
+                    const data = await response.json();
+                    showToast(data.message || "Failed to update account", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+        
+        function cancelAccountEdit(id) {
+            fetchAccounts();
+        }
+
+        // Fetch Trade Logs
+        async function fetchLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const logs = await response.json();
+                
+                const listContainer = document.getElementById('logs-list');
+                if (logs.length === 0) {
+                    listContainer.innerHTML = `
+                        <tr>
+                            <td colspan="6" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                                No trade execution logs found.
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+                
+                listContainer.innerHTML = '';
+                logs.forEach(log => {
+                    const row = document.createElement('tr');
+                    
+                    let timeStr = log.timestamp;
+                    if (timeStr) {
+                        const d = new Date(timeStr);
+                        timeStr = d.toLocaleString();
+                    } else {
+                        timeStr = '--';
+                    }
+                    
+                    const statusClass = 'status-' + log.status;
+                    
+                    row.innerHTML = `
+                        <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${timeStr}</td>
+                        <td style="padding: 1rem; font-weight: 500;">${log.ticker}</td>
+                        <td style="padding: 1rem; text-transform: uppercase; font-size: 0.8rem;">${log.action}</td>
+                        <td style="padding: 1rem; text-transform: capitalize; color: var(--text-secondary); font-size: 0.85rem;">${log.source}</td>
+                        <td style="padding: 1rem;"><span class="status-badge ${statusClass}">${log.status}</span></td>
+                        <td style="padding: 1rem;"><div class="log-details-text">${log.details || '--'}</div></td>
+                    `;
+                    listContainer.appendChild(row);
+                });
+            } catch (err) {
+                console.error("Failed to load logs:", err);
+            }
+        }
+
+        // Fetch Email Settings
+        async function fetchEmailSettings() {
+            try {
+                const response = await fetch('/api/email-settings');
+                const settings = await response.json();
+                
+                document.getElementById('email-enabled').checked = settings.enabled;
+                document.getElementById('imap-host').value = settings.imap_host || 'imap.gmail.com';
+                document.getElementById('imap-port').value = settings.imap_port || '993';
+                document.getElementById('email-address').value = settings.email_address || '';
+                document.getElementById('email-password').value = settings.email_password || '';
+                document.getElementById('email-sender').value = settings.email_sender || 'noreply@tradingview.com';
+                document.getElementById('email-subject').value = settings.email_subject || 'TradingView Alert';
+            } catch (err) {
+                console.error("Failed to load email settings:", err);
+            }
+        }
+
+        // Save Email Settings
+        document.getElementById('email-settings-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const payload = {
+                enabled: document.getElementById('email-enabled').checked,
+                imap_host: document.getElementById('imap-host').value,
+                imap_port: parseInt(document.getElementById('imap-port').value),
+                email_address: document.getElementById('email-address').value,
+                email_password: document.getElementById('email-password').value,
+                email_sender: document.getElementById('email-sender').value,
+                email_subject: document.getElementById('email-subject').value
+            };
+            
+            try {
+                const response = await fetch('/api/email-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (response.ok) {
+                    showToast("Email integration settings saved successfully!");
+                    fetchEmailSettings();
+                } else {
+                    showToast("Failed to save email settings", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        });
+
+        // Test Email Connection
+        document.getElementById('test-email-btn').addEventListener('click', async function() {
+            const btn = this;
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'Connecting...';
+            
+            const payload = {
+                imap_host: document.getElementById('imap-host').value,
+                imap_port: parseInt(document.getElementById('imap-port').value),
+                email_address: document.getElementById('email-address').value,
+                email_password: document.getElementById('email-password').value
+            };
+            
+            try {
+                const response = await fetch('/api/email-settings/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                if (response.ok && data.status === "success") {
+                    showToast("IMAP connection and login test: SUCCESSFUL!");
+                } else {
+                    showToast(data.message || "IMAP connection failed", false);
+                }
+            } catch (err) {
+                showToast("Network error occurred during test", false);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        });
+
+        function exportJournal() {
+            window.location.href = '/api/journal/export';
+            showToast('Exporting trade journal (CSV)...');
+        }
+
+        // Global variables for Closed Positions pagination
+        window.closedPositionsCache = [];
+        window.isClosedPositionsExpanded = false;
+        window.closedPositionsCurrentPage = 1;
+        const closedPositionsPageSize = 20;
+
+        function renderClosedPositionsTable() {
+            const closedContainer = document.getElementById('closed-positions-list');
+            const controlsContainer = document.getElementById('closed-positions-controls');
+            const paginationContainer = document.getElementById('closed-positions-pagination');
+            
+            if (!window.closedPositionsCache || window.closedPositionsCache.length === 0) {
+                closedContainer.innerHTML = `
+                    <tr>
+                        <td colspan="10" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                            No closed trade history found.
+                        </td>
+                    </tr>
+                `;
+                controlsContainer.style.display = 'none';
+                return;
+            }
+
+            // Only show controls if there are more than 5 trades
+            if (window.closedPositionsCache.length <= 5) {
+                controlsContainer.style.display = 'none';
+            } else {
+                controlsContainer.style.display = 'flex';
+            }
+
+            closedContainer.innerHTML = '';
+
+            let displayPositions = [];
+            if (!window.isClosedPositionsExpanded) {
+                displayPositions = window.closedPositionsCache.slice(0, 5);
+                document.getElementById('expand-text').innerText = `Show All History (${window.closedPositionsCache.length} trades)`;
+                document.getElementById('expand-arrow').innerText = '▼';
+                paginationContainer.style.display = 'none';
+                controlsContainer.style.justifyContent = 'center';
+            } else {
+                const startIdx = (window.closedPositionsCurrentPage - 1) * closedPositionsPageSize;
+                const endIdx = startIdx + closedPositionsPageSize;
+                displayPositions = window.closedPositionsCache.slice(startIdx, endIdx);
+                document.getElementById('expand-text').innerText = 'Collapse';
+                document.getElementById('expand-arrow').innerText = '▲';
+                controlsContainer.style.justifyContent = 'space-between';
+                
+                renderClosedPositionsPagination();
+            }
+
+            displayPositions.forEach(pos => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid var(--border-color)';
+                
+                const pnlVal = parseFloat(pos.realized_pnl);
+                const feesVal = parseFloat(pos.fees || 0);
+                const netPnlVal = parseFloat(pos.net_pnl || pnlVal);
+                
+                const pnlColor = pnlVal > 0 ? 'var(--success)' : (pnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                const pnlPrefix = pnlVal > 0 ? '+' : '';
+                
+                const netPnlColor = netPnlVal > 0 ? 'var(--success)' : (netPnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                const netPnlPrefix = netPnlVal > 0 ? '+' : '';
+                
+                const sideBadge = pos.side === 'LONG' ? 
+                    `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
+                    `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
+                
+                row.innerHTML = `
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${pos.closed_at || '--'}</td>
+                    <td style="padding: 1rem; font-weight: 500;">${pos.account_name}</td>
+                    <td style="padding: 1rem; font-weight: 500;">${pos.symbol}</td>
+                    <td style="padding: 1rem;">${sideBadge}</td>
+                    <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.closed_size}</td>
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.close_price.toFixed(2)}</td>
+                    <td style="padding: 1rem; font-weight: 500; color: ${pnlColor}; font-size: 0.9rem;">
+                        ${pnlPrefix}${pnlVal.toFixed(4)}
+                    </td>
+                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${feesVal.toFixed(4)}</td>
+                    <td style="padding: 1rem; font-weight: 600; color: ${netPnlColor}; font-size: 0.9rem;">
+                        ${netPnlPrefix}${netPnlVal.toFixed(4)}
+                    </td>
+                `;
+                closedContainer.appendChild(row);
+            });
+        }
+
+        function toggleExpandClosedPositions() {
+            window.isClosedPositionsExpanded = !window.isClosedPositionsExpanded;
+            window.closedPositionsCurrentPage = 1; // reset to first page on toggle
+            renderClosedPositionsTable();
+        }
+
+        function renderClosedPositionsPagination() {
+            const paginationContainer = document.getElementById('closed-positions-pagination');
+            paginationContainer.style.display = 'flex';
+            paginationContainer.innerHTML = '';
+
+            const totalPages = Math.ceil(window.closedPositionsCache.length / closedPositionsPageSize);
+            if (totalPages <= 1) {
+                paginationContainer.style.display = 'none';
+                return;
+            }
+
+            // Prev button
+            const prevBtn = document.createElement('button');
+            prevBtn.className = 'btn btn-secondary btn-sm';
+            prevBtn.style.padding = '0.25rem 0.5rem';
+            prevBtn.innerText = '←';
+            prevBtn.disabled = window.closedPositionsCurrentPage === 1;
+            prevBtn.onclick = () => {
+                if (window.closedPositionsCurrentPage > 1) {
+                    window.closedPositionsCurrentPage--;
+                    renderClosedPositionsTable();
+                }
+            };
+            paginationContainer.appendChild(prevBtn);
+
+            // Generate smart pagination range: e.g. 1 2 3 ... 10
+            const current = window.closedPositionsCurrentPage;
+            const delta = 1; // Show current page and 1 page before & after
+            const range = [];
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= current - delta && i <= current + delta)) {
+                    range.push(i);
+                } else if (range[range.length - 1] !== '...') {
+                    range.push('...');
+                }
+            }
+
+            range.forEach(p => {
+                if (p === '...') {
+                    const span = document.createElement('span');
+                    span.style.padding = '0.25rem 0.5rem';
+                    span.style.color = 'var(--text-secondary)';
+                    span.style.userSelect = 'none';
+                    span.innerText = '...';
+                    paginationContainer.appendChild(span);
+                } else {
+                    const pageBtn = document.createElement('button');
+                    pageBtn.className = p === window.closedPositionsCurrentPage ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
+                    pageBtn.style.padding = '0.25rem 0.6rem';
+                    pageBtn.style.minWidth = '2rem';
+                    pageBtn.innerText = p;
+                    pageBtn.onclick = () => {
+                        window.closedPositionsCurrentPage = p;
+                        renderClosedPositionsTable();
+                    };
+                    paginationContainer.appendChild(pageBtn);
+                }
+            });
+
+            // Next button
+            const nextBtn = document.createElement('button');
+            nextBtn.className = 'btn btn-secondary btn-sm';
+            nextBtn.style.padding = '0.25rem 0.5rem';
+            nextBtn.innerText = '→';
+            nextBtn.disabled = window.closedPositionsCurrentPage === totalPages;
+            nextBtn.onclick = () => {
+                if (window.closedPositionsCurrentPage < totalPages) {
+                    window.closedPositionsCurrentPage++;
+                    renderClosedPositionsTable();
+                }
+            };
+            paginationContainer.appendChild(nextBtn);
+        }
+
+        // Fetch Open & Closed Positions and PnL
+        async function fetchPnL() {
+            try {
+                const response = await fetch('/api/pnl');
+                const data = await response.json();
+                
+                // 1. Render Open Positions
+                const openContainer = document.getElementById('open-positions-list');
+                const openPositions = data.open || [];
+                
+                if (openPositions.length === 0) {
+                    openContainer.innerHTML = `
+                        <tr>
+                            <td colspan="9" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                                No open positions active.
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    openContainer.innerHTML = '';
+                    openPositions.forEach(pos => {
+                        const row = document.createElement('tr');
+                        const pnlVal = parseFloat(pos.unrealized_pnl);
+                        const pnlColor = pnlVal > 0 ? 'var(--success)' : (pnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
+                        const pnlPrefix = pnlVal > 0 ? '+' : '';
+                        const sideBadge = pos.side === 'LONG' ? 
+                            `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
+                            `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
+                        
+                        row.innerHTML = `
+                            <td style="padding: 1rem; font-weight: 500;">${pos.account_name}</td>
+                            <td style="padding: 1rem; font-weight: 500;">${pos.symbol}</td>
+                            <td style="padding: 1rem;">${sideBadge}</td>
+                            <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.size}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
+                            <td class="mark-price-${pos.symbol}" style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.mark_price.toFixed(2)}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.margin.toFixed(2)}</td>
+                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${pos.leverage}x</td>
+                            <td style="padding: 1rem; font-weight: 600; color: ${pnlColor}; font-size: 0.9rem;">
+                                ${pnlPrefix}${pnlVal.toFixed(4)}
+                            </td>
+                        `;
+                        openContainer.appendChild(row);
+                    });
+                }
+                
+                // 2. Render Closed Positions
+                window.closedPositionsCache = data.closed || [];
+                renderClosedPositionsTable();
+            } catch (err) {
+                console.error("Failed to load PnL data:", err);
+            }
+        }
+
+        // ----------------- WEBHOOK PLAYGROUND FUNCTIONS -----------------
+        function togglePlayQtyOverride() {
+            const override = document.getElementById('play-qty-override').checked;
+            document.getElementById('play-qty-group').style.display = override ? 'block' : 'none';
+            generatePlayload();
+        }
+
+        function updateSimulateButtonText() {
+            const live = document.getElementById('play-live-execute').checked;
+            const btn = document.getElementById('trigger-sandbox-btn');
+            if (live) {
+                btn.innerText = "Execute Live Order";
+                btn.className = "btn btn-danger";
+            } else {
+                btn.innerText = "Run Simulation";
+                btn.className = "btn btn-primary";
+            }
+        }
+
+        function generatePlayload() {
+            const ticker = document.getElementById('play-ticker').value;
+            const action = document.getElementById('play-action').value;
+            const override = document.getElementById('play-qty-override').checked;
+            const qty = override ? parseFloat(document.getElementById('play-qty').value) : null;
+            
+            // We pull the passphrase from the Global settings field
+            const passphrase = document.getElementById('passphrase').value || "my_secure_passphrase";
+
+            const payload = {
+                ticker: ticker,
+                action: action,
+                passphrase: passphrase
+            };
+
+            if (override && qty !== null && !isNaN(qty)) {
+                payload.quantity = qty;
+            }
+
+            document.getElementById('play-payload-box').innerText = JSON.stringify(payload, null, 4);
+        }
+
+        function copyPlayload() {
+            const text = document.getElementById('play-payload-box').innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast("Payload JSON copied to clipboard!");
+            }).catch(err => {
+                showToast("Failed to copy", false);
+            });
+        }
+
+        async function triggerSandbox() {
+            const btn = document.getElementById('trigger-sandbox-btn');
+            const consoleBox = document.getElementById('sandbox-console');
+            
+            const ticker = document.getElementById('play-ticker').value;
+            const action = document.getElementById('play-action').value;
+            const override = document.getElementById('play-qty-override').checked;
+            const qty = override ? parseFloat(document.getElementById('play-qty').value) : null;
+            const live = document.getElementById('play-live-execute').checked;
+            const passphrase = document.getElementById('passphrase').value;
+            
+            if (!passphrase) {
+                showToast("Save/enter passphrase under Global Settings first!", false);
+                return;
+            }
+
+            const payload = {
+                ticker: ticker,
+                action: action,
+                passphrase: passphrase,
+                live_execute: live
+            };
+
+            if (override && qty !== null && !isNaN(qty)) {
+                payload.quantity = qty;
+            }
+
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = live ? "Executing live order..." : "Running simulation...";
+            consoleBox.innerHTML = `[${new Date().toLocaleTimeString()}] Contacting Flask simulation API...\n`;
+
+            try {
+                const response = await fetch('/api/simulate-webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    if (live) {
+                        consoleBox.innerHTML += `\n[SUCCESS] Live execution thread started.\nDetails: ${result.details}\n\nCheck the "Trade Logs" tab or your Telegram/Discord channel for status updates.`;
+                        showToast("Live trade execution triggered!");
+                    } else {
+                        consoleBox.innerHTML += `\n[SUCCESS] Simulation complete.\nTicker: ${result.ticker}\nSymbol Resolved: ${result.symbol} (Lot Size: ${result.contract_value})\n\n`;
+                        result.results.forEach(r => {
+                            const statusEmoji = r.success ? "🟢" : "🔴";
+                            consoleBox.innerHTML += `${statusEmoji} Account: ${r.account}\n   ${r.message}\n\n`;
+                        });
+                        showToast("Simulation run finished!");
+                    }
+                } else {
+                    consoleBox.innerHTML += `\n[ERROR] API request failed.\nCode: ${response.status}\nMessage: ${result.message || JSON.stringify(result)}`;
+                    showToast(result.message || "Failed to trigger sandbox", false);
+                }
+            } catch (err) {
+                consoleBox.innerHTML += `\n[CRITICAL ERROR] Network connection failed: ${err.message}`;
+                showToast("Network/Server connection failed", false);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+                consoleBox.scrollTop = consoleBox.scrollHeight;
+            }
+        }
+
+        async function resetBreaker(id) {
+            try {
+                const response = await fetch(`/api/accounts/${id}/reset-breaker`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showToast("Circuit breaker reset successfully!");
+                    fetchAccounts();
+                } else {
+                    showToast(result.message || "Failed to reset circuit breaker", false);
+                }
+            } catch (err) {
+                console.error("Failed to reset circuit breaker:", err);
+                showToast("Network/Server connection failed", false);
+            }
+        }
+
+        async function fetchAnalytics() {
+            try {
+                const response = await fetch('/api/analytics');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Update KPI Metrics
+                    const netProfitEl = document.getElementById('metric-net-profit');
+                    netProfitEl.innerText = (data.metrics.net_profit >= 0 ? '+' : '') + '$' + data.metrics.net_profit.toFixed(2);
+                    netProfitEl.style.color = data.metrics.net_profit >= 0 ? 'var(--success)' : 'var(--danger)';
+                    
+                    document.getElementById('metric-win-rate').innerText = data.metrics.win_rate.toFixed(1) + '%';
+                    document.getElementById('metric-profit-factor').innerText = data.metrics.profit_factor.toFixed(2);
+                    document.getElementById('metric-sharpe-ratio').innerText = data.metrics.sharpe_ratio.toFixed(2);
+                    document.getElementById('metric-recovery-factor').innerText = data.metrics.recovery_factor.toFixed(2);
+                    document.getElementById('metric-total-trades').innerText = data.metrics.total_trades;
+
+                    // 1. Portfolio Equity Curve
+                    const equityOptions = {
+                        chart: {
+                            type: 'area',
+                            height: 350,
+                            background: 'transparent',
+                            foreColor: '#9ca3af',
+                            toolbar: { show: false }
+                        },
+                        stroke: { curve: 'smooth', width: 2 },
+                        fill: {
+                            type: 'gradient',
+                            gradient: {
+                                shadeIntensity: 1,
+                                opacityFrom: 0.45,
+                                opacityTo: 0.05,
+                                stops: [0, 100]
+                            }
+                        },
+                        colors: ['#a855f7'],
+                        series: [{
+                            name: 'Cumulative Profit (USD)',
+                            data: data.series_pnl.map(pt => ({ x: pt.x, y: parseFloat(pt.y) }))
+                        }],
+                        xaxis: {
+                            type: 'category',
+                            labels: {
+                                rotate: -45,
+                                maxHeight: 60,
+                                style: { fontSize: '10px' }
+                            }
+                        },
+                        yaxis: {
+                            labels: {
+                                formatter: val => '$' + val.toFixed(2)
+                            }
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)' },
+                        tooltip: { theme: 'dark' }
+                    };
+
+                    if (window.equityChart) {
+                        window.equityChart.destroy();
+                    }
+                    window.equityChart = new ApexCharts(document.querySelector("#chart-equity"), equityOptions);
+                    window.equityChart.render();
+
+                    // 2. Drawdowns Curve
+                    const drawdownOptions = {
+                        chart: {
+                            type: 'area',
+                            height: 350,
+                            background: 'transparent',
+                            foreColor: '#9ca3af',
+                            toolbar: { show: false }
+                        },
+                        stroke: { curve: 'smooth', width: 2 },
+                        fill: {
+                            type: 'gradient',
+                            gradient: {
+                                shadeIntensity: 1,
+                                opacityFrom: 0.4,
+                                opacityTo: 0.05,
+                                stops: [0, 100]
+                            }
+                        },
+                        colors: ['#ef4444'],
+                        series: [{
+                            name: 'Peak Drawdown (%)',
+                            data: data.series_drawdown.map(pt => ({ x: pt.x, y: parseFloat(pt.y) }))
+                        }],
+                        xaxis: {
+                            type: 'category',
+                            labels: {
+                                rotate: -45,
+                                maxHeight: 60,
+                                style: { fontSize: '10px' }
+                            }
+                        },
+                        yaxis: {
+                            labels: {
+                                formatter: val => val.toFixed(2) + '%'
+                            }
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)' },
+                        tooltip: { theme: 'dark' }
+                    };
+
+                    if (window.drawdownChart) {
+                        window.drawdownChart.destroy();
+                    }
+                    window.drawdownChart = new ApexCharts(document.querySelector("#chart-drawdown"), drawdownOptions);
+                    window.drawdownChart.render();
+
+                    // 3. Time-of-day Profitability Heatmap
+                    const heatmapOptions = {
+                        chart: {
+                            type: 'heatmap',
+                            height: 380,
+                            background: 'transparent',
+                            foreColor: '#9ca3af',
+                            toolbar: { show: false }
+                        },
+                        plotOptions: {
+                            heatmap: {
+                                shadeIntensity: 0.5,
+                                radius: 2,
+                                useDirectColors: false,
+                                colorScale: {
+                                    ranges: [
+                                        { from: -1000000, to: -0.0001, name: 'Loss', color: '#ef4444' },
+                                        { from: 0, to: 0, name: 'Flat', color: '#374151' },
+                                        { from: 0.0001, to: 1000000, name: 'Profit', color: '#10b981' }
+                                    ]
+                                }
+                            }
+                        },
+                        dataLabels: { enabled: false },
+                        series: data.heatmap,
+                        xaxis: {
+                            type: 'category',
+                            title: { text: 'Hour of Day (UTC)', style: { color: '#9ca3af' } }
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)' },
+                        tooltip: {
+                            theme: 'dark',
+                            y: {
+                                formatter: val => '$' + val.toFixed(4)
+                            }
+                        }
+                    };
+
+                    if (window.heatmapChart) {
+                        window.heatmapChart.destroy();
+                    }
+                    window.heatmapChart = new ApexCharts(document.querySelector("#chart-heatmap"), heatmapOptions);
+                    window.heatmapChart.render();
+                } else {
+                    showToast("Failed to load analytics: " + data.message, false);
+                }
+            } catch (err) {
+                console.error("Failed to load analytics:", err);
+                showToast("Network error loading analytics", false);
+            }
+        }
+
+        let ws = null;
+        function updateSymbolPrice(symbol, price) {
+            const normalizedSymbol = symbol.replace('.P', '');
+            const elements = document.querySelectorAll(`.mark-price-${normalizedSymbol}`);
+            elements.forEach(el => {
+                const oldPrice = parseFloat(el.innerText.replace('$', ''));
+                el.innerText = `$${price.toFixed(2)}`;
+                if (!isNaN(oldPrice)) {
+                    if (price > oldPrice) {
+                        el.style.color = 'var(--success)';
+                        setTimeout(() => { el.style.color = 'var(--text-secondary)'; }, 500);
+                    } else if (price < oldPrice) {
+                        el.style.color = 'var(--danger)';
+                        setTimeout(() => { el.style.color = 'var(--text-secondary)'; }, 500);
+                    }
+                }
+            });
+        }
+
+        function connectWebSocket(wsUrl) {
+            if (ws) {
+                try { ws.close(); } catch(e) {}
+            }
+            ws = new WebSocket(wsUrl);
+            ws.onopen = () => {
+                console.log("WebSocket connected to", wsUrl);
+                ws.send(JSON.stringify({
+                    "type": "subscribe",
+                    "payload": {
+                        "channels": [
+                            { "name": "ticker", "symbols": ["ETHUSD.P", "BTCUSD.P"] }
+                        ]
+                    }
+                }));
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg && (msg.type === "ticker" || msg.channel === "ticker")) {
+                        const data = msg.data || msg;
+                        const symbol = data.symbol;
+                        const markPrice = parseFloat(data.mark_price || data.last_price || data.price);
+                        if (symbol && !isNaN(markPrice)) {
+                            updateSymbolPrice(symbol, markPrice);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error parsing WS message:", e);
+                }
+            };
+            ws.onclose = () => {
+                console.log("WebSocket connection closed. Reconnecting in 5s...");
+                setTimeout(() => connectWebSocket(wsUrl), 5000);
+            };
+            ws.onerror = (err) => {
+                console.error("WebSocket error:", err);
+            };
+        }
+
+        async function checkApiLatency() {
+            const start = performance.now();
+            try {
+                const response = await fetch('/api/settings');
+                if (response.ok) {
+                    const end = performance.now();
+                    const latency = Math.round(end - start);
+                    
+                    const dot = document.getElementById('latency-dot');
+                    const text = document.getElementById('latency-text');
+                    if (dot && text) {
+                        text.innerText = `API Latency: ${latency} ms`;
+                        if (latency < 150) {
+                            dot.style.backgroundColor = 'var(--success)';
+                            dot.style.boxShadow = '0 0 8px var(--success)';
+                        } else if (latency < 400) {
+                            dot.style.backgroundColor = '#f59e0b';
+                            dot.style.boxShadow = '0 0 8px #f59e0b';
+                        } else {
+                            dot.style.backgroundColor = 'var(--danger)';
+                            dot.style.boxShadow = '0 0 8px var(--danger)';
+                        }
+                    }
+                }
+            } catch (err) {
+                const dot = document.getElementById('latency-dot');
+                const text = document.getElementById('latency-text');
+                if (dot && text) {
+                    text.innerText = 'API Offline';
+                    dot.style.backgroundColor = 'var(--danger)';
+                    dot.style.boxShadow = '0 0 8px var(--danger)';
+                }
+            }
+        }
+        
+        // Start latency checking
+        setInterval(checkApiLatency, 15000);
+        checkApiLatency();
+
+        // Initialize lists
+        fetchAccounts();
+        fetchSettings();
+        fetchLogs();
+        fetchEmailSettings();
+        fetchPnL();
+    </script>
+</body>
+</html>
