@@ -47,11 +47,10 @@ def run_strategy_for_account(app, account, client):
         db.session.add(state)
         db.session.commit()
         
-    # 3. Fetch historical candles for indicator calculations
-    # Fetch 300 candles of 5m resolution. 300 * 5 * 60 = 90000 seconds (25 hours)
     to_time = int(time.time())
-    from_time = to_time - 100000
-    query_str = f"symbol={SYMBOL}&resolution={RESOLUTION}&from={from_time}&to={to_time}"
+    from_time = to_time - 100000 # ~27 hours of history
+    exchange_symbol = product.get("symbol", SYMBOL)
+    query_str = f"symbol={exchange_symbol}&resolution={RESOLUTION}&from={from_time}&to={to_time}"
     
     response = client._request("GET", "/v2/chart/history", query_string=query_str, is_private=False)
     if not response.get("success"):
@@ -279,6 +278,12 @@ def run_strategy_for_account(app, account, client):
         qty_base = risk_dollars / sl_dist
         qty_lots = int(math.floor(qty_base / contract_val))
         
+        # Enforce maximum buying power based on leverage
+        lot_value_usd = last_close * contract_val
+        max_buying_power = balance * account.leverage * 0.90
+        max_qty_lots = int(math.floor(max_buying_power / lot_value_usd))
+        qty_lots = min(qty_lots, max_qty_lots)
+        
         if qty_lots <= 0:
             logger.warning(f"[{account.name}] Calculated long size is 0 lots (Balance: {balance:.2f}, Risk: {risk_dollars:.2f}).")
             state.last_signal_time = last_completed_time
@@ -338,6 +343,12 @@ def run_strategy_for_account(app, account, client):
         
         qty_base = risk_dollars / sl_dist
         qty_lots = int(math.floor(qty_base / contract_val))
+        
+        # Enforce maximum buying power based on leverage
+        lot_value_usd = last_close * contract_val
+        max_buying_power = balance * account.leverage * 0.90
+        max_qty_lots = int(math.floor(max_buying_power / lot_value_usd))
+        qty_lots = min(qty_lots, max_qty_lots)
         
         if qty_lots <= 0:
             logger.warning(f"[{account.name}] Calculated short size is 0 lots (Balance: {balance:.2f}, Risk: {risk_dollars:.2f}).")
