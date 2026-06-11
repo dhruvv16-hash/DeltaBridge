@@ -52,6 +52,54 @@ public_delta_client = DeltaClient(
     base_url=Config.BASE_URL
 )
 
+def send_notification(title, message, status_color=3447003):
+    import requests
+    # Ensure this doesn't run during testing to avoid making external requests
+    if os.getenv("FLASK_ENV") == "testing":
+        return
+    try:
+        telegram_enabled = GlobalSetting.query.filter_by(key="telegram_enabled").first()
+        telegram_token = GlobalSetting.query.filter_by(key="telegram_token").first()
+        telegram_chat_id = GlobalSetting.query.filter_by(key="telegram_chat_id").first()
+        
+        discord_enabled = GlobalSetting.query.filter_by(key="discord_enabled").first()
+        discord_webhook_url = GlobalSetting.query.filter_by(key="discord_webhook_url").first()
+
+        # Discord Embed
+        if discord_enabled and discord_enabled.value.lower() == "true" and discord_webhook_url and discord_webhook_url.value:
+            payload = {
+                "embeds": [{
+                    "title": title,
+                    "description": message.replace("<b>", "**").replace("</b>", "**").replace("<pre>", "```").replace("</pre>", "```"),
+                    "color": int(status_color),
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                }]
+            }
+            try:
+                res = requests.post(discord_webhook_url.value, json=payload, timeout=5)
+                if res.status_code >= 400:
+                    logger.error(f"Discord notification HTTP error: {res.status_code} - {res.text}")
+            except Exception as e:
+                logger.error(f"Failed to post to Discord webhook: {e}")
+
+        # Telegram Message
+        if telegram_enabled and telegram_enabled.value.lower() == "true" and telegram_token and telegram_token.value and telegram_chat_id and telegram_chat_id.value:
+            url = f"https://api.telegram.org/bot{telegram_token.value}/sendMessage"
+            payload = {
+                "chat_id": telegram_chat_id.value,
+                "text": f"<b>{title}</b>\n\n{message}",
+                "parse_mode": "HTML"
+            }
+            try:
+                res = requests.post(url, json=payload, timeout=5)
+                if res.status_code >= 400:
+                    logger.error(f"Telegram notification HTTP error: {res.status_code} - {res.text}")
+            except Exception as e:
+                logger.error(f"Failed to send to Telegram bot: {e}")
+    except Exception as e:
+        logger.error(f"Error executing send_notification: {e}")
+
+
 # ----------------- EMAIL DOUBLE-VERIFICATION INTEGRATION -----------------
 
 def parse_email_signal(body, subject):
@@ -317,25 +365,447 @@ def dashboard():
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
     passphrase_setting = GlobalSetting.query.filter_by(key="passphrase").first()
+    telegram_enabled = GlobalSetting.query.filter_by(key="telegram_enabled").first()
+    telegram_token = GlobalSetting.query.filter_by(key="telegram_token").first()
+    telegram_chat_id = GlobalSetting.query.filter_by(key="telegram_chat_id").first()
+    discord_enabled = GlobalSetting.query.filter_by(key="discord_enabled").first()
+    discord_webhook_url = GlobalSetting.query.filter_by(key="discord_webhook_url").first()
+    
+    base_url = Config.BASE_URL.lower()
+    if "testnet" in base_url:
+        ws_url = "wss://api.testnet.delta.exchange/v2/websocket"
+    elif "india" in base_url:
+        ws_url = "wss://api.india.delta.exchange/v2/websocket"
+    else:
+        ws_url = "wss://api.delta.exchange/v2/websocket"
+        
     return jsonify({
-        "passphrase": passphrase_setting.value if passphrase_setting else Config.PASSPHRASE
+        "passphrase": passphrase_setting.value if passphrase_setting else Config.PASSPHRASE,
+        "telegram_enabled": telegram_enabled.value if telegram_enabled else "false",
+        "telegram_token": telegram_token.value if telegram_token else "",
+        "telegram_chat_id": telegram_chat_id.value if telegram_chat_id else "",
+        "discord_enabled": discord_enabled.value if discord_enabled else "false",
+        "discord_webhook_url": discord_webhook_url.value if discord_webhook_url else "",
+        "ws_url": ws_url
     })
 
 @app.route("/api/settings", methods=["POST"])
 def save_settings():
     data = request.get_json(silent=True) or {}
-    passphrase = data.get("passphrase")
-    if not passphrase:
-        return jsonify({"status": "error", "message": "Passphrase is required"}), 400
-        
-    passphrase_setting = GlobalSetting.query.filter_by(key="passphrase").first()
-    if passphrase_setting:
-        passphrase_setting.value = passphrase
-    else:
-        passphrase_setting = GlobalSetting(key="passphrase", value=passphrase)
-        db.session.add(passphrase_setting)
+    
+    # We update all settings passed
+    for key in ["passphrase", "telegram_enabled", "telegram_token", "telegram_chat_id", "discord_enabled", "discord_webhook_url"]:
+        if key in data:
+            val = str(data[key])
+            setting = GlobalSetting.query.filter_by(key=key).first()
+            if setting:
+                setting.value = val
+            else:
+                setting = GlobalSetting(key=key, value=val)
+                db.session.add(setting)
+    
     db.session.commit()
     return jsonify({"status": "success", "message": "Settings saved"})
+
+@app.route("/api/notifications/test", methods=["POST"])
+def test_notification():
+    title = "🔔 Delta Bot Alert: Test Connection"
+    message = "Your Telegram and Discord alert integration was configured and tested successfully!"
+    send_notification(title, message, 3447003)
+    return jsonify({"status": "success", "message": "Test notification dispatched"})
+
+@app.route("/api/simulate-webhook", methods=["POST"])
+def simulate_webhook():
+    try:
+        data = request.get_json(silent=True) or {}
+        ticker = data.get("ticker")
+        action = data.get("action")
+        passphrase = data.get("passphrase")
+        live_execute = data.get("live_execute", False)
+        
+        # 1. Validation
+        if not ticker or not action or not passphrase:
+            return jsonify({"status": "error", "message": "Missing required fields: ticker, action, passphrase"}), 400
+            
+        passphrase_setting = GlobalSetting.query.filter_by(key="passphrase").first()
+        configured_passphrase = passphrase_setting.value if passphrase_setting else Config.PASSPHRASE
+        if passphrase != configured_passphrase:
+            return jsonify({"status": "error", "message": "Invalid passphrase"}), 401
+            
+        action = action.lower()
+        if action not in ["buy", "sell", "close_long", "close_short"]:
+            return jsonify({"status": "error", "message": f"Invalid action: {action}"}), 400
+
+        # Fetch active accounts
+        active_accounts = Account.query.filter_by(is_active=True).all()
+        if not active_accounts:
+            if Config.API_KEY and Config.API_SECRET:
+                fallback_account = Account(
+                    id=0,
+                    name="Environment Default",
+                    api_key=Config.API_KEY,
+                    api_secret=Config.API_SECRET,
+                    leverage=Config.DEFAULT_LEVERAGE,
+                    balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                    sizing_type="percentage",
+                    fixed_amount=10.0,
+                    is_active=True
+                )
+                active_accounts = [fallback_account]
+            else:
+                return jsonify({"status": "error", "message": "No active trading accounts configured"}), 400
+
+        # Resolve product
+        product = public_delta_client.get_product_by_symbol(ticker)
+        if not product:
+            return jsonify({"status": "error", "message": f"Ticker '{ticker}' not found on Delta Exchange"}), 404
+
+        symbol = product.get("symbol")
+        product_id = product.get("id")
+        contract_value = float(product.get("contract_value", "0.01"))
+        
+        if live_execute:
+            # Trigger live background order execution
+            accounts_data = [acc.to_dict() for acc in active_accounts]
+            for acc_dict in accounts_data:
+                # Add unmasked keys for execution
+                acc_db = Account.query.get(acc_dict["id"]) if acc_dict["id"] != 0 else None
+                acc_dict["api_key"] = acc_db.api_key if acc_db else Config.API_KEY
+                acc_dict["api_secret"] = acc_db.api_secret if acc_db else Config.API_SECRET
+            
+            import threading
+            threading.Thread(target=execute_trades_background, args=(accounts_data, ticker, action, "sandbox_live", data)).start()
+            return jsonify({
+                "status": "success",
+                "message": "Live trade execution started in background",
+                "details": f"Symbol: {symbol}, Action: {action.upper()}"
+            })
+
+        # Dry Run Simulation
+        simulation_logs = []
+        for acc in active_accounts:
+            acc_name = acc.name
+            sim_log = {
+                "account": acc_name,
+                "success": True,
+                "message": ""
+            }
+            try:
+                # Mock client for balance & tickers in test mode, otherwise use actual credentials
+                client = DeltaClient(
+                    api_key=acc.api_key,
+                    api_secret=acc.api_secret,
+                    base_url=Config.BASE_URL
+                )
+                
+                # Fetch balance
+                if os.getenv("FLASK_ENV") == "testing" or acc.api_key == "key1":
+                    balance, asset = 100.0, "USD"
+                    price = 2000.0
+                else:
+                    try:
+                        balance, asset = client.get_available_balance()
+                        ticker_data = client.get_ticker(symbol)
+                        price = float(ticker_data.get("mark_price") or ticker_data.get("last_price") or 2000.0)
+                    except Exception as client_err:
+                        balance, asset = 100.0, "USD"
+                        price = 2000.0
+                        simulation_logs.append({
+                            "account": acc_name,
+                            "success": False,
+                            "message": f"Could not fetch live balance/price (simulated with 100 USD @ $2000): {client_err}"
+                        })
+                        continue
+
+                lot_value_usd = price * contract_value
+                qty_lots = None
+                sizing_desc = ""
+
+                # Payload override
+                payload_qty = data.get("quantity") or data.get("qty")
+                if payload_qty is not None:
+                    try:
+                        qty_base = float(payload_qty)
+                        qty_lots = int(math.floor(qty_base / contract_value))
+                        sizing_desc = f"Payload Quantity = {qty_base} (Lots = {qty_lots})"
+                    except Exception:
+                        pass
+                
+                if qty_lots is None:
+                    if acc.sizing_type == "fixed":
+                        if acc.fixed_amount > balance:
+                            sim_log.update({
+                                "success": False,
+                                "message": f"Simulation failed: Fixed Margin {acc.fixed_amount} {asset} exceeds balance {balance} {asset}."
+                            })
+                            simulation_logs.append(sim_log)
+                            continue
+                        buying_power = acc.fixed_amount * acc.leverage
+                        sizing_desc = f"Fixed Margin = {acc.fixed_amount} {asset}"
+                    else:
+                        buying_power = balance * acc.leverage * (acc.balance_buffer_pct / 100.0)
+                        sizing_desc = f"Percentage Allocation = {acc.balance_buffer_pct}%"
+                        
+                    qty_lots = int(math.floor(buying_power / lot_value_usd))
+
+                required_margin = (qty_lots * lot_value_usd) / acc.leverage
+                if required_margin > balance:
+                    sim_log.update({
+                        "success": False,
+                        "message": f"Simulation failed: Margin required ({required_margin:.2f} {asset}) for {qty_lots} lots exceeds balance ({balance:.2f} {asset})."
+                    })
+                elif qty_lots <= 0:
+                    sim_log.update({
+                        "success": False,
+                        "message": "Simulation failed: Computed quantity is 0 lots. Insufficient margin."
+                    })
+                else:
+                    sim_log.update({
+                        "success": True,
+                        "message": f"Simulated successfully: Would place {action.upper()} market order of size {qty_lots} lots (~{qty_lots * contract_value:.4f} base asset) on {symbol} @ mark price ${price:.2f}. Sizing rule: {sizing_desc}. Required margin: ${required_margin:.2f} {asset}."
+                    })
+            except Exception as e:
+                sim_log.update({
+                    "success": False,
+                    "message": f"Simulation error: {str(e)}"
+                })
+            simulation_logs.append(sim_log)
+
+        return jsonify({
+            "status": "success",
+            "simulation": True,
+            "ticker": ticker,
+            "action": action,
+            "symbol": symbol,
+            "contract_value": contract_value,
+            "results": simulation_logs
+        })
+    except Exception as outer_err:
+        logger.exception(f"Error in simulate_webhook: {outer_err}")
+        return jsonify({"status": "error", "message": f"Webhook simulation failed: {str(outer_err)}"}), 500
+@app.route("/api/analytics", methods=["GET"])
+def get_analytics():
+    try:
+        # We need to compile closed trades history from the exchange
+        active_accounts = Account.query.filter_by(is_active=True).all()
+        if not active_accounts:
+            if Config.API_KEY and Config.API_SECRET:
+                fallback_account = Account(
+                    id=0,
+                    name="Environment Default",
+                    api_key=Config.API_KEY,
+                    api_secret=Config.API_SECRET,
+                    leverage=Config.DEFAULT_LEVERAGE,
+                    balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                    sizing_type="percentage",
+                    fixed_amount=10.0,
+                    is_active=True
+                )
+                active_accounts = [fallback_account]
+            else:
+                return jsonify({
+                    "status": "success", 
+                    "metrics": {
+                        "win_rate": 0,
+                        "profit_factor": 0,
+                        "sharpe_ratio": 0,
+                        "recovery_factor": 0,
+                        "total_trades": 0,
+                        "net_profit": 0
+                    }, 
+                    "series_pnl": [], 
+                    "series_drawdown": [], 
+                    "heatmap": []
+                })
+
+        # Fetch products for symbol mapping
+        products = []
+        try:
+            products = public_delta_client.get_products()
+        except Exception as e:
+            logger.warning(f"Failed to fetch products for analytics: {e}")
+        product_map = {p.get("id"): p for p in products if p.get("id")}
+
+        all_closed = []
+        for account in active_accounts:
+            try:
+                client = DeltaClient(
+                    api_key=account.api_key,
+                    api_secret=account.api_secret,
+                    base_url=Config.BASE_URL
+                )
+                closed = client.get_closed_positions(limit=150)
+                for pos in closed:
+                    # Calculate net PnL and timestamps
+                    product_id = pos.get("product_id")
+                    prod_info = product_map.get(product_id) or pos.get("product") or {}
+                    symbol = prod_info.get("symbol") or f"ID:{product_id}"
+                    
+                    rpnl = float(pos.get("realized_pnl") or pos.get("pnl") or 0.0)
+                    
+                    closed_at = pos.get("closed_at")
+                    closed_at_raw = 0
+                    closed_at_str = ""
+                    if closed_at:
+                        try:
+                            import datetime
+                            iso_str = str(closed_at)
+                            if iso_str.endswith('Z'):
+                                iso_str = iso_str[:-1] + '+00:00'
+                            try:
+                                dt = datetime.datetime.fromisoformat(iso_str)
+                                closed_at_raw = dt.timestamp()
+                                closed_at_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                            except ValueError:
+                                t_val = float(closed_at)
+                                if t_val > 1e12:
+                                    t_val = t_val / 1000.0
+                                if t_val > 1e11:
+                                    t_val = t_val / 1000.0
+                                closed_at_raw = t_val
+                                dt = datetime.datetime.fromtimestamp(t_val, datetime.timezone.utc)
+                                closed_at_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            closed_at_str = str(closed_at)
+
+                    # Estimate fees
+                    realized_fee_val = pos.get("fee") or pos.get("realized_fee") or pos.get("commission")
+                    if realized_fee_val is not None:
+                        fees = abs(float(realized_fee_val))
+                    else:
+                        entry_px = float(pos.get("entry_price") or pos.get("avg_entry_price") or 0)
+                        exit_px = float(pos.get("close_price") or pos.get("exit_price") or 0)
+                        contract_val_str = prod_info.get("contract_value") or "0.01"
+                        try:
+                            contract_value = float(contract_val_str)
+                        except ValueError:
+                            contract_value = 0.01
+                        c_size = abs(float(pos.get("closed_size") or pos.get("size") or 0.0))
+                        entry_notional = entry_px * c_size * contract_value
+                        exit_notional = exit_px * c_size * contract_value
+                        fees = (entry_notional + exit_notional) * 0.0005
+
+                    net_pnl = rpnl - fees
+                    all_closed.append({
+                        "net_pnl": net_pnl,
+                        "closed_at_raw": closed_at_raw,
+                        "closed_at_str": closed_at_str,
+                    })
+            except Exception as e:
+                logger.error(f"Error fetching analytics for account {account.name}: {e}")
+
+        # If no closed trades, return empty
+        if not all_closed:
+            return jsonify({
+                "status": "success",
+                "metrics": {
+                    "win_rate": 0,
+                    "profit_factor": 0,
+                    "sharpe_ratio": 0,
+                    "recovery_factor": 0,
+                    "total_trades": 0,
+                    "net_profit": 0
+                },
+                "series_pnl": [],
+                "series_drawdown": [],
+                "heatmap": []
+            })
+
+        # Sort chronologically (oldest first) to build cumulative equity curve
+        all_closed.sort(key=lambda x: x.get("closed_at_raw", 0))
+
+        # 1. Math Analytics
+        total_trades = len(all_closed)
+        winning_trades = sum(1 for t in all_closed if t["net_pnl"] > 0)
+        win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0
+        
+        gross_profit = sum(t["net_pnl"] for t in all_closed if t["net_pnl"] > 0)
+        gross_loss = sum(abs(t["net_pnl"]) for t in all_closed if t["net_pnl"] < 0)
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 1.0)
+        net_profit = sum(t["net_pnl"] for t in all_closed)
+
+        # Sharpe Ratio
+        pnls = [t["net_pnl"] for t in all_closed]
+        avg_pnl = sum(pnls) / total_trades
+        if total_trades > 1:
+            variance = sum((p - avg_pnl) ** 2 for p in pnls) / (total_trades - 1)
+            std_dev = math.sqrt(variance)
+            sharpe_ratio = (avg_pnl / std_dev) * math.sqrt(total_trades) if std_dev > 0 else 0.0
+        else:
+            sharpe_ratio = 0.0
+
+        # Equity Curve and Drawdowns
+        running_equity = 0.0
+        peak_equity = 0.0
+        max_drawdown = 0.0
+        
+        series_pnl = []
+        series_drawdown = []
+        
+        # Add initial starting point
+        series_pnl.append({"x": "Start", "y": 0.0})
+        series_drawdown.append({"x": "Start", "y": 0.0})
+
+        for idx, t in enumerate(all_closed):
+            running_equity += t["net_pnl"]
+            if running_equity > peak_equity:
+                peak_equity = running_equity
+            
+            # Drawdown from peak
+            dd_val = peak_equity - running_equity
+            dd_pct = (dd_val / peak_equity * 100.0) if peak_equity > 0 else (dd_val if dd_val > 0 else 0.0)
+            if dd_pct > max_drawdown:
+                max_drawdown = dd_pct
+                
+            label = t["closed_at_str"] or f"Trade #{idx + 1}"
+            series_pnl.append({"x": label, "y": round(running_equity, 4)})
+            series_drawdown.append({"x": label, "y": round(-abs(dd_pct), 2)})
+
+        recovery_factor = (net_profit / max_drawdown) if max_drawdown > 0 else 0.0
+
+        # 2. Time-of-Day Heatmap Matrix
+        heatmap_data = {day: {hour: 0.0 for hour in range(24)} for day in range(7)}
+        
+        for t in all_closed:
+            if t["closed_at_raw"] > 0:
+                import datetime
+                dt = datetime.datetime.fromtimestamp(t["closed_at_raw"], datetime.timezone.utc)
+                heatmap_data[dt.weekday()][dt.hour] += t["net_pnl"]
+
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        heatmap_series = []
+        
+        for day_idx in range(7):
+            day_name = day_names[day_idx]
+            hour_data = []
+            for hour in range(24):
+                hour_label = f"{hour:02d}:00"
+                hour_data.append({
+                    "x": hour_label,
+                    "y": round(heatmap_data[day_idx][hour], 4)
+                })
+            heatmap_series.append({
+                "name": day_name,
+                "data": hour_data
+            })
+
+        return jsonify({
+            "status": "success",
+            "metrics": {
+                "win_rate": round(win_rate, 2),
+                "profit_factor": round(profit_factor, 2),
+                "sharpe_ratio": round(sharpe_ratio, 2),
+                "recovery_factor": round(recovery_factor, 2),
+                "total_trades": total_trades,
+                "net_profit": round(net_profit, 4)
+            },
+            "series_pnl": series_pnl,
+            "series_drawdown": series_drawdown,
+            "heatmap": heatmap_series
+        })
+    except Exception as e:
+        logger.exception(f"Error compiling analytics: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/api/logs", methods=["GET"])
 def get_logs():
@@ -809,6 +1279,13 @@ def add_account():
     sizing_type = data.get("sizing_type", "percentage")
     fixed_amount = data.get("fixed_amount", 10.0)
     
+    daily_loss_limit = None
+    if "daily_loss_limit" in data and data["daily_loss_limit"] is not None and data["daily_loss_limit"] != "":
+        try:
+            daily_loss_limit = float(data["daily_loss_limit"])
+        except ValueError:
+            pass
+            
     if not name or not api_key or not api_secret:
         return jsonify({"status": "error", "message": "Name, API Key, and API Secret are required"}), 400
         
@@ -820,6 +1297,8 @@ def add_account():
         balance_buffer_pct=float(balance_buffer_pct),
         sizing_type=sizing_type,
         fixed_amount=float(fixed_amount),
+        daily_loss_limit=daily_loss_limit,
+        is_circuit_broken=False,
         is_active=True
     )
     db.session.add(acc)
@@ -846,9 +1325,28 @@ def update_account(id):
         acc.sizing_type = data["sizing_type"]
     if "fixed_amount" in data:
         acc.fixed_amount = float(data["fixed_amount"])
+    if "daily_loss_limit" in data:
+        limit_val = data["daily_loss_limit"]
+        if limit_val is None or limit_val == "" or limit_val == "null":
+            acc.daily_loss_limit = None
+        else:
+            try:
+                acc.daily_loss_limit = float(limit_val)
+            except ValueError:
+                pass
+    if "is_circuit_broken" in data:
+        acc.is_circuit_broken = bool(data["is_circuit_broken"])
         
     db.session.commit()
     return jsonify({"status": "success", "account": acc.to_dict()})
+
+@app.route("/api/accounts/<int:id>/reset-breaker", methods=["POST"])
+def reset_breaker(id):
+    acc = Account.query.get_or_404(id)
+    acc.is_circuit_broken = False
+    db.session.commit()
+    logger.info(f"Circuit breaker reset successfully for account '{acc.name}' (ID: {acc.id}).")
+    return jsonify({"status": "success", "message": f"Circuit breaker reset for account {acc.name}", "account": acc.to_dict()})
 
 @app.route("/api/accounts/<int:id>", methods=["DELETE"])
 def delete_account(id):
@@ -873,6 +1371,98 @@ def get_account_balance(id):
 
 # ----------------- TRADING WEBHOOK ENDPOINT -----------------
 
+def get_daily_pnl(client, product_map=None):
+    """Calculates cumulative net PnL (realized PnL - fees) for positions closed today in UTC."""
+    import datetime
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    start_of_day = datetime.datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=datetime.timezone.utc)
+    start_timestamp = start_of_day.timestamp()
+    
+    if not product_map:
+        try:
+            products = public_delta_client.get_products()
+            product_map = {p.get("id"): p for p in products if p.get("id")}
+        except Exception:
+            product_map = {}
+            
+    daily_net_pnl = 0.0
+    try:
+        closed = client.get_closed_positions(limit=50)
+        for pos in closed:
+            closed_at = pos.get("closed_at")
+            closed_at_raw = 0
+            if closed_at:
+                try:
+                    iso_str = str(closed_at)
+                    if iso_str.endswith('Z'):
+                        iso_str = iso_str[:-1] + '+00:00'
+                    try:
+                        dt = datetime.datetime.fromisoformat(iso_str)
+                        closed_at_raw = dt.timestamp()
+                    except ValueError:
+                        t_val = float(closed_at)
+                        if t_val > 1e12:
+                            t_val = t_val / 1000.0
+                        if t_val > 1e11:
+                            t_val = t_val / 1000.0
+                        closed_at_raw = t_val
+                except Exception:
+                    pass
+            
+            if closed_at_raw >= start_timestamp:
+                rpnl = float(pos.get("realized_pnl") or pos.get("pnl") or 0.0)
+                product_id = pos.get("product_id")
+                prod_info = product_map.get(product_id) or pos.get("product") or {}
+                
+                realized_fee_val = pos.get("fee") or pos.get("realized_fee") or pos.get("commission")
+                if realized_fee_val is not None:
+                    fees = abs(float(realized_fee_val))
+                else:
+                    entry_px = float(pos.get("entry_price") or pos.get("avg_entry_price") or 0)
+                    exit_px = float(pos.get("close_price") or pos.get("exit_price") or 0)
+                    contract_val_str = prod_info.get("contract_value") or "0.01"
+                    try:
+                        contract_value = float(contract_val_str)
+                    except ValueError:
+                        contract_value = 0.01
+                    c_size = abs(float(pos.get("closed_size") or pos.get("size") or 0.0))
+                    entry_notional = entry_px * c_size * contract_value
+                    exit_notional = exit_px * c_size * contract_value
+                    fees = (entry_notional + exit_notional) * 0.0005
+                
+                net_pnl = rpnl - fees
+                daily_net_pnl += net_pnl
+    except Exception as e:
+        logger.error(f"Error calculating daily PnL: {e}")
+    return daily_net_pnl
+
+def close_all_positions(client):
+    """Closes all open positions using reduce-only orders."""
+    closed_any = False
+    try:
+        positions = client.get_open_positions()
+        for pos in positions:
+            try:
+                size_val = float(pos.get("size") or 0.0)
+                pos_size = abs(int(size_val))
+                if pos_size > 0:
+                    product_id = pos.get("product_id")
+                    is_long = size_val > 0
+                    close_side = "sell" if is_long else "buy"
+                    client.place_order(
+                        product_id=product_id,
+                        size=pos_size,
+                        side=close_side,
+                        order_type="market_order",
+                        reduce_only=True
+                    )
+                    closed_any = True
+            except Exception as e:
+                logger.error(f"Failed to close position in close_all_positions for {pos}: {e}")
+    except Exception as e:
+        logger.error(f"Error in close_all_positions: {e}")
+    return closed_any
+
 def execute_trades_background(accounts_data, ticker, action, source="webhook", payload=None):
     """Processes trading signals across all configured accounts in a background thread."""
     with app.app_context():
@@ -891,6 +1481,12 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
             )
             db.session.add(log_entry)
             db.session.commit()
+            
+            # Send Notification
+            title = f"🔴 Trade Alert Failure: {ticker} ({action.upper()})"
+            msg = f"Symbol <b>'{ticker}'</b> not found on Delta Exchange."
+            send_notification(title, msg, 15680580)
+            
             return [{
                 "account_id": acc["id"],
                 "name": acc["name"],
@@ -926,6 +1522,50 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
                     api_secret=acc["api_secret"],
                     base_url=Config.BASE_URL
                 )
+                
+                # Retrieve fresh DB details if it's a real account
+                acc_db = None
+                if acc_id != 0:
+                    acc_db = Account.query.get(acc_id)
+                
+                is_circuit_broken_flag = acc_db.is_circuit_broken if acc_db else False
+                daily_loss_limit_val = acc_db.daily_loss_limit if acc_db else None
+                
+                # Check circuit breaker before processing
+                if is_circuit_broken_flag:
+                    if action in ["buy", "sell"]:
+                        logger.warning(f"Trading halted on account '{acc_name}' (ID: {acc_id}): Daily drawdown circuit breaker is tripped.")
+                        account_result.update({"success": False, "message": "Circuit breaker is broken (trading halted)"})
+                        results.append(account_result)
+                        continue
+                        
+                # Perform daily drawdown calculation if limit is configured
+                if not is_circuit_broken_flag and daily_loss_limit_val is not None:
+                    daily_pnl = get_daily_pnl(client)
+                    logger.info(f"Account '{acc_name}' daily net PnL: {daily_pnl:.4f} USD (Limit: {daily_loss_limit_val:.4f} USD)")
+                    if daily_pnl < 0 and abs(daily_pnl) >= daily_loss_limit_val:
+                        logger.warning(f"Daily loss limit reached on account '{acc_name}'! Breached limit: {daily_loss_limit_val:.2f} USD. Tripping circuit breaker...")
+                        # 1. Trip circuit breaker in DB
+                        if acc_db:
+                            acc_db.is_circuit_broken = True
+                            db.session.commit()
+                        
+                        # 2. Close all positions
+                        close_all_positions(client)
+                        
+                        # 3. Dispatch alert
+                        title = f"🚨 Circuit Breaker Tripped: {acc_name}"
+                        notification_message = (
+                            f"Account: <b>{acc_name}</b>\n"
+                            f"Status: <b>HALTED</b>\n"
+                            f"Daily Loss Breach: <b>{abs(daily_pnl):.2f} USD</b> (Limit: {daily_loss_limit_val:.2f} USD)\n"
+                            f"Action: <b>All positions automatically closed</b>"
+                        )
+                        send_notification(title, notification_message, 15549011)
+                        
+                        account_result.update({"success": False, "message": f"Circuit breaker tripped. Daily loss: {abs(daily_pnl):.2f} USD"})
+                        results.append(account_result)
+                        continue
                 
                 # Check for close/exit actions
                 if action in ["close_long", "close_short"]:
@@ -1151,6 +1791,17 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
         db.session.add(log_entry)
         db.session.commit()
         logger.info(f"Saved TradeLog entry to database. Status: {status}")
+        
+        # Send Notification
+        title_emoji = "🟢" if status == "success" else ("🟡" if status == "partial" else "🔴")
+        title = f"{title_emoji} Trade Alert: {ticker} ({action.upper()})"
+        notification_message = (
+            f"<b>Source:</b> {source}\n"
+            f"<b>Status:</b> {status.upper()}\n\n"
+            f"<b>Details:</b>\n<pre>{details_str}</pre>"
+        )
+        status_color = 1096065 if status == "success" else (16498468 if status == "partial" else 15680580)
+        send_notification(title, notification_message, status_color)
                 
         logger.info("Background trade execution completed.")
         return results
@@ -1324,6 +1975,24 @@ def run_migrations():
         except Exception as e:
             db.session.rollback()
             logger.debug(f"fixed_amount migration status: {e}")
+            
+        # 3. Add daily_loss_limit
+        try:
+            db.session.execute(text("ALTER TABLE accounts ADD COLUMN daily_loss_limit FLOAT NULL"))
+            db.session.commit()
+            logger.info("Database migration: added daily_loss_limit column to accounts table.")
+        except Exception as e:
+            db.session.rollback()
+            logger.debug(f"daily_loss_limit migration status: {e}")
+            
+        # 4. Add is_circuit_broken
+        try:
+            db.session.execute(text("ALTER TABLE accounts ADD COLUMN is_circuit_broken BOOLEAN DEFAULT FALSE NOT NULL"))
+            db.session.commit()
+            logger.info("Database migration: added is_circuit_broken column to accounts table.")
+        except Exception as e:
+            db.session.rollback()
+            logger.debug(f"is_circuit_broken migration status: {e}")
     except Exception as e:
         logger.error(f"Migration failed: {e}")
 

@@ -882,5 +882,308 @@ class TestSizingModels(unittest.TestCase):
         # Assert order was NOT placed
         mock_client.place_order.assert_not_called()
 
+class TestNotificationSettings(unittest.TestCase):
+    def setUp(self):
+        import os
+        os.environ["FLASK_ENV"] = "testing"
+        from app import app, db, GlobalSetting
+        self.GlobalSetting = GlobalSetting
+        self.db = db
+        
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        
+        # Bind the app context
+        self.app_context = app.app_context()
+        self.app_context.push()
+        
+        # Clean up any session leftovers
+        db.session.rollback()
+        db.session.close()
+        db.session.expunge_all()
+        db.create_all()
+        
+        # Clear existing passphrase to ensure clean test environment
+        GlobalSetting.query.filter_by(key="passphrase").delete()
+        db.session.add(GlobalSetting(key="passphrase", value="test_passphrase"))
+        db.session.commit()
+
+    def tearDown(self):
+        self.db.session.remove()
+        self.db.drop_all()
+        self.app_context.pop()
+
+    def test_get_settings(self):
+        # Add notification settings
+        self.db.session.add(self.GlobalSetting(key="telegram_enabled", value="true"))
+        self.db.session.add(self.GlobalSetting(key="telegram_token", value="my_token"))
+        self.db.session.add(self.GlobalSetting(key="telegram_chat_id", value="123456"))
+        self.db.session.add(self.GlobalSetting(key="discord_enabled", value="true"))
+        self.db.session.add(self.GlobalSetting(key="discord_webhook_url", value="my_discord"))
+        self.db.session.commit()
+
+        response = self.app.get('/api/settings')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["passphrase"], "test_passphrase")
+        self.assertEqual(data["telegram_enabled"], "true")
+        self.assertEqual(data["telegram_token"], "my_token")
+        self.assertEqual(data["telegram_chat_id"], "123456")
+        self.assertEqual(data["discord_enabled"], "true")
+        self.assertEqual(data["discord_webhook_url"], "my_discord")
+
+    def test_save_settings(self):
+        payload = {
+            "passphrase": "new_passphrase",
+            "telegram_enabled": "true",
+            "telegram_token": "my_new_token",
+            "telegram_chat_id": "987654",
+            "discord_enabled": "false",
+            "discord_webhook_url": "my_new_discord"
+        }
+        response = self.app.post('/api/settings', json=payload)
+        self.assertEqual(response.status_code, 200)
+        
+        # Assert database was updated
+        passphrase = self.GlobalSetting.query.filter_by(key="passphrase").first()
+        self.assertEqual(passphrase.value, "new_passphrase")
+        
+        tg_token = self.GlobalSetting.query.filter_by(key="telegram_token").first()
+        self.assertEqual(tg_token.value, "my_new_token")
+
+    def test_notifications_test_endpoint(self):
+        # Testing test endpoint returns success response
+        response = self.app.post('/api/notifications/test')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["status"], "success")
+
+class TestWebhookPlayground(unittest.TestCase):
+    def setUp(self):
+        import os
+        os.environ["FLASK_ENV"] = "testing"
+        from app import app, db, Account, GlobalSetting
+        self.Account = Account
+        self.GlobalSetting = GlobalSetting
+        self.db = db
+        
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        
+        # Bind the app context
+        self.app_context = app.app_context()
+        self.app_context.push()
+        
+        # Initialize tables
+        db.session.rollback()
+        db.session.close()
+        db.session.expunge_all()
+        db.create_all()
+        
+        # Seed test passphrase
+        db.session.add(GlobalSetting(key="passphrase", value="test_passphrase"))
+        
+        # Seed an active account
+        self.acc = Account(
+            name="Playground Test Acc",
+            api_key="play_key",
+            api_secret="play_secret",
+            leverage=20,
+            balance_buffer_pct=50.0,
+            sizing_type="percentage",
+            is_active=True
+        )
+        db.session.add(self.acc)
+        db.session.commit()
+
+    def tearDown(self):
+        self.db.session.remove()
+        self.db.drop_all()
+        self.app_context.pop()
+
+    @patch('app.public_delta_client')
+    def test_simulate_webhook_dry_run_success(self, mock_public_client):
+        # Mock product resolution
+        mock_public_client.get_product_by_symbol.return_value = {
+            "id": 27,
+            "symbol": "ETHUSD",
+            "contract_value": "0.01"
+        }
+        
+        payload = {
+            "ticker": "ETHUSD.P",
+            "action": "buy",
+            "passphrase": "test_passphrase"
+        }
+        response = self.app.post('/api/simulate-webhook', json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["simulation"])
+        self.assertEqual(data["ticker"], "ETHUSD.P")
+        self.assertEqual(data["results"][0]["account"], "Playground Test Acc")
+        self.assertTrue(data["results"][0]["success"])
+        self.assertIn("Simulated successfully", data["results"][0]["message"])
+
+    @patch('app.public_delta_client')
+    def test_simulate_webhook_invalid_passphrase(self, mock_public_client):
+        payload = {
+            "ticker": "ETHUSD.P",
+            "action": "buy",
+            "passphrase": "wrong_passphrase"
+        }
+        response = self.app.post('/api/simulate-webhook', json=payload)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["message"], "Invalid passphrase")
+
+class TestCircuitBreaker(unittest.TestCase):
+    def setUp(self):
+        import os
+        os.environ["FLASK_ENV"] = "testing"
+        from app import app, db, Account, GlobalSetting
+        self.Account = Account
+        self.GlobalSetting = GlobalSetting
+        self.db = db
+        
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        
+        # Bind the app context
+        self.app_context = app.app_context()
+        self.app_context.push()
+        
+        # Initialize tables
+        db.session.rollback()
+        db.session.close()
+        db.session.expunge_all()
+        db.create_all()
+        
+        # Seed test passphrase
+        db.session.add(GlobalSetting(key="passphrase", value="test_passphrase"))
+        
+        # Seed an active account with a daily loss limit
+        self.acc = Account(
+            name="Breaker Test Acc",
+            api_key="key1",
+            api_secret="secret1",
+            leverage=20,
+            balance_buffer_pct=50.0,
+            sizing_type="percentage",
+            daily_loss_limit=10.0,
+            is_circuit_broken=False,
+            is_active=True
+        )
+        db.session.add(self.acc)
+        db.session.commit()
+
+    def tearDown(self):
+        self.db.session.remove()
+        self.db.drop_all()
+        self.app_context.pop()
+
+    @patch('app.DeltaClient')
+    @patch('app.public_delta_client')
+    def test_circuit_breaker_tripping(self, mock_public_client, mock_client_class):
+        # Mock product resolution
+        mock_public_client.get_product_by_symbol.return_value = {
+            "id": 27,
+            "symbol": "ETHUSD",
+            "contract_value": "0.01"
+        }
+        
+        # Mock private client instance
+        mock_private_client = mock_client_class.return_value
+        
+        # Mock get_available_balance
+        mock_private_client.get_available_balance.return_value = (100.0, "USD")
+        
+        # Mock get_ticker
+        mock_private_client.get_ticker.return_value = {"mark_price": "2000.0", "last_price": "2000.0"}
+        
+        # Mock get_open_positions
+        mock_private_client.get_open_positions.return_value = [
+            {"product_id": 27, "size": "10", "side": "buy"}
+        ]
+        
+        # Mock get_closed_positions to return trades closed today with a net loss of 15.0 USD
+        import datetime
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        mock_private_client.get_closed_positions.return_value = [
+            {
+                "product_id": 27,
+                "closed_size": "5",
+                "side": "sell",
+                "entry_price": "1850",
+                "close_price": "1840",
+                "realized_pnl": "-15.0",
+                "fee": "0.0",
+                "closed_at": now_utc.isoformat()
+            }
+        ]
+        
+        # Send a webhook to trigger execute_trades_background
+        payload = {
+            "ticker": "ETHUSD.P",
+            "action": "buy",
+            "passphrase": "test_passphrase"
+        }
+        response = self.app.post('/webhook', json=payload)
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify account is now circuit broken in database
+        self.db.session.expire_all()
+        updated_acc = self.Account.query.get(self.acc.id)
+        self.assertTrue(updated_acc.is_circuit_broken)
+        
+        # Assert place_order was called with reduce_only=True to close the open position
+        mock_private_client.place_order.assert_any_call(
+            product_id=27,
+            size=10,
+            side="sell",
+            order_type="market_order",
+            reduce_only=True
+        )
+
+    @patch('app.DeltaClient')
+    @patch('app.public_delta_client')
+    def test_already_circuit_broken_halts_trades(self, mock_public_client, mock_client_class):
+        # Set is_circuit_broken to True
+        self.acc.is_circuit_broken = True
+        self.db.session.commit()
+        
+        # Mock product resolution
+        mock_public_client.get_product_by_symbol.return_value = {
+            "id": 27,
+            "symbol": "ETHUSD",
+            "contract_value": "0.01"
+        }
+        
+        # Mock private client instance
+        mock_private_client = mock_client_class.return_value
+        
+        payload = {
+            "ticker": "ETHUSD.P",
+            "action": "buy",
+            "passphrase": "test_passphrase"
+        }
+        response = self.app.post('/webhook', json=payload)
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify order was not placed since trading is halted
+        mock_private_client.place_order.assert_not_called()
+
+    def test_reset_breaker_endpoint(self):
+        # Make the account broken
+        self.acc.is_circuit_broken = True
+        self.db.session.commit()
+        
+        response = self.app.post(f'/api/accounts/{self.acc.id}/reset-breaker')
+        self.assertEqual(response.status_code, 200)
+        
+        # Verify account is no longer circuit broken in database
+        updated_acc = self.Account.query.get(self.acc.id)
+        self.assertFalse(updated_acc.is_circuit_broken)
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,8 @@ class Account(db.Model):
     sizing_type = db.Column(db.String(20), default="percentage", nullable=False) # "percentage" or "fixed"
     fixed_amount = db.Column(db.Float, default=10.0, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+    daily_loss_limit = db.Column(db.Float, nullable=True)
+    is_circuit_broken = db.Column(db.Boolean, default=False, nullable=False)
     
     def to_dict(self):
         return {
@@ -25,7 +27,9 @@ class Account(db.Model):
             "balance_buffer_pct": self.balance_buffer_pct,
             "sizing_type": self.sizing_type,
             "fixed_amount": self.fixed_amount,
-            "is_active": self.is_active
+            "is_active": self.is_active,
+            "daily_loss_limit": self.daily_loss_limit,
+            "is_circuit_broken": self.is_circuit_broken
         }
 
 class GlobalSetting(db.Model):

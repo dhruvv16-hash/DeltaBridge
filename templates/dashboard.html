@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <style>
         :root {
             --bg-color: #0b0b0f;
@@ -473,8 +474,10 @@
         <ul class="nav-links">
             <li class="active" data-tab="accounts-tab"><a href="#accounts">Accounts</a></li>
             <li data-tab="pnl-tab"><a href="#pnl">Trades & PnL</a></li>
+            <li data-tab="analytics-tab"><a href="#analytics">Performance Analytics</a></li>
             <li data-tab="logs-tab"><a href="#logs">Trade Logs</a></li>
             <li data-tab="email-tab"><a href="#email">Email Verification</a></li>
+            <li data-tab="playground-tab"><a href="#playground">Alert Playground</a></li>
             <li data-tab="settings-tab"><a href="#settings">Global Settings</a></li>
         </ul>
     </aside>
@@ -483,6 +486,10 @@
     <main>
         <header>
             <h2 id="page-title">Accounts Management</h2>
+            <div id="latency-indicator" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-secondary);">
+                <span id="latency-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--text-secondary); display: inline-block; box-shadow: 0 0 8px var(--text-secondary);"></span>
+                <span id="latency-text">API Latency: -- ms</span>
+            </div>
         </header>
 
         <!-- ACCOUNTS TAB PANEL -->
@@ -524,6 +531,10 @@
                         <div class="form-group" id="fixed-amount-group" style="display: none;">
                             <label for="fixed-amount">Fixed Margin Amount (USDT/USDC)</label>
                             <input type="number" id="fixed-amount" value="10" min="0.001" step="any" required>
+                        </div>
+                        <div class="form-group" id="daily-loss-limit-group">
+                            <label for="daily-loss-limit">Daily Loss Limit (USD, optional)</label>
+                            <input type="number" id="daily-loss-limit" placeholder="No Limit" min="0.01" step="any">
                         </div>
                         <div class="form-group" style="justify-content: flex-end; padding-top: 1.5rem;">
                             <button type="submit" class="btn btn-primary">Add Account</button>
@@ -641,6 +652,173 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Notification Channels Card -->
+            <div class="card" style="margin-top: 2rem;">
+                <div class="card-title">Real-Time Alert Channels</div>
+                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2rem;">
+                    <!-- Telegram Form Block -->
+                    <div style="border-right: 1px solid var(--border-color); padding-right: 2rem; display: flex; flex-direction: column; gap: 1.25rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Telegram Bot Alerts</span>
+                            <label class="switch">
+                                <input type="checkbox" id="telegram-enabled-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="telegram-token">Telegram Bot Token</label>
+                            <input type="password" id="telegram-token" placeholder="Enter Bot API Token">
+                        </div>
+                        <div class="form-group">
+                            <label for="telegram-chat-id">Telegram Chat ID</label>
+                            <input type="text" id="telegram-chat-id" placeholder="Enter Chat ID (e.g. -100...)">
+                        </div>
+                    </div>
+                    
+                    <!-- Discord Form Block -->
+                    <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Discord Webhook Alerts</span>
+                            <label class="switch">
+                                <input type="checkbox" id="discord-enabled-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="discord-webhook-url">Discord Webhook URL</label>
+                            <input type="password" id="discord-webhook-url" placeholder="Enter Webhook URL">
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 2rem; display: flex; gap: 1rem;">
+                    <button id="save-notifications-btn" class="btn btn-primary" onclick="saveNotificationSettings()">Save Alert Channels</button>
+                    <button id="test-notifications-btn" class="btn btn-secondary" onclick="testNotifications()">Send Test Alert</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- PERFORMANCE ANALYTICS TAB PANEL -->
+        <section id="analytics-tab" class="tab-panel">
+            <!-- Analytics KPI Grid -->
+            <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Net Profit</div>
+                    <div id="metric-net-profit" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">$0.00</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Win Rate</div>
+                    <div id="metric-win-rate" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0%</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Profit Factor</div>
+                    <div id="metric-profit-factor" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Sharpe Ratio</div>
+                    <div id="metric-sharpe-ratio" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Recovery Factor</div>
+                    <div id="metric-recovery-factor" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0.0</div>
+                </div>
+                <div class="card" style="margin-bottom: 0; padding: 1.5rem; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.5rem;">Total Trades</div>
+                    <div id="metric-total-trades" style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--text-primary);">0</div>
+                </div>
+            </div>
+
+            <!-- Charts Cards Grid -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 2rem; margin-bottom: 2rem;">
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-title">Cumulative Portfolio Equity Curve</div>
+                    <div id="chart-equity" style="min-height: 350px;"></div>
+                </div>
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-title">Historical Peak Drawdowns (%)</div>
+                    <div id="chart-drawdown" style="min-height: 350px;"></div>
+                </div>
+            </div>
+
+            <!-- Time-of-day Heatmap Card -->
+            <div class="card">
+                <div class="card-title">Time-of-Day Profitability Heatmap (Net PnL)</div>
+                <div id="chart-heatmap" style="min-height: 380px;"></div>
+            </div>
+        </section>
+
+        <!-- PLAYGROUND TAB PANEL -->
+        <section id="playground-tab" class="tab-panel">
+            <div class="card">
+                <div class="card-title">TradingView Webhook Playground</div>
+                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2.5rem;">
+                    <!-- Alert Builder Form -->
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Alert Signal Generator</span>
+                        
+                        <div class="form-group">
+                            <label for="play-ticker">Ticker / Symbol</label>
+                            <select id="play-ticker" onchange="generatePlayload()" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.9rem;">
+                                <option value="ETHUSD.P">ETHUSD.P (Ether Perpetual)</option>
+                                <option value="BTCUSD.P">BTCUSD.P (Bitcoin Perpetual)</option>
+                                <option value="SOLUSD.P">SOLUSD.P (Solana Perpetual)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="play-action">Action</label>
+                            <select id="play-action" onchange="generatePlayload()" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.9rem;">
+                                <option value="buy">BUY (Open/Increase LONG or close SHORT)</option>
+                                <option value="sell">SELL (Open/Increase SHORT or close LONG)</option>
+                                <option value="close_long">CLOSE LONG (Reduce-only Long exit)</option>
+                                <option value="close_short">CLOSE SHORT (Reduce-only Short exit)</option>
+                            </select>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Override Account Sizing (Custom Qty)</span>
+                            <label class="switch">
+                                <input type="checkbox" id="play-qty-override" onchange="togglePlayQtyOverride()">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        
+                        <div class="form-group" id="play-qty-group" style="display: none;">
+                            <label for="play-qty">Custom Trade Size (in Base Asset, e.g. 0.25 ETH)</label>
+                            <input type="number" id="play-qty" value="0.1" min="0.0001" step="any" oninput="generatePlayload()">
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                            <div>
+                                <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; display: block;">Execute Live Order</span>
+                                <span style="font-size: 0.75rem; color: var(--danger); display: block; margin-top: 0.25rem;">Warning: Submits real order to exchange!</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="play-live-execute" onchange="updateSimulateButtonText()">
+                                <span class="slider" style="border-color: rgba(239, 68, 68, 0.4);"></span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- Sandbox Output / Generated Code -->
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600;">Webhook Payload JSON</span>
+                        
+                        <div style="position: relative;">
+                            <pre id="play-payload-box" style="background-color: rgba(0,0,0,0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; font-family: monospace; font-size: 0.85rem; color: #a78bfa; overflow-x: auto; min-height: 120px;"></pre>
+                            <button class="btn btn-secondary btn-sm" style="position: absolute; right: 10px; top: 10px; padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="copyPlayload()">Copy</button>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <button id="trigger-sandbox-btn" class="btn btn-primary" onclick="triggerSandbox()">Run Simulation</button>
+                        </div>
+
+                        <span style="font-family: 'Outfit', sans-serif; font-size: 1.1rem; font-weight: 600; margin-top: 1rem;">Simulation Logs Console</span>
+                        <div id="sandbox-console" style="background-color: #050508; border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; font-family: monospace; font-size: 0.85rem; color: var(--text-secondary); min-height: 150px; max-height: 250px; overflow-y: auto; white-space: pre-wrap; box-shadow: inset 0 2px 8px rgba(0,0,0,0.8); line-height: 1.4;">Waiting for webhook simulation trigger...</div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- TRADES & PNL TAB PANEL -->
@@ -741,6 +919,10 @@
                     fetchLogs();
                 } else if (tabId === 'accounts-tab') {
                     fetchAccounts();
+                } else if (tabId === 'playground-tab') {
+                    generatePlayload();
+                } else if (tabId === 'analytics-tab') {
+                    fetchAnalytics();
                 }
             });
         });
@@ -784,20 +966,30 @@
                     
                     const sizingLabel = acc.sizing_type === 'fixed' ? 'Fixed Margin' : 'Allocation';
                     const sizingValue = acc.sizing_type === 'fixed' ? `$${acc.fixed_amount.toFixed(2)}` : `${acc.balance_buffer_pct}%`;
+                    const lossLimitText = acc.daily_loss_limit ? `$${acc.daily_loss_limit.toFixed(2)}` : 'No Limit';
+                    
+                    let breakerBadge = '';
+                    let resetBreakerBtn = '';
+                    if (acc.is_circuit_broken) {
+                        breakerBadge = `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.15); color: var(--danger); font-weight: 700; margin-left: 0.5rem; text-transform: uppercase;">CIRCUIT BROKEN - HALTED</span>`;
+                        resetBreakerBtn = `<button class="btn btn-danger btn-sm" onclick="resetBreaker(${acc.id})" style="background-color: #ef4444; border-color: #ef4444;">Reset Breaker</button>`;
+                    }
                     
                     row.innerHTML = `
                         <div class="account-info">
-                            <div class="account-name">${acc.name}</div>
+                            <div class="account-name" style="display: flex; align-items: center; gap: 0.5rem;">${acc.name}${breakerBadge}</div>
                             <div class="account-details">
                                 <span>API Key: <b>${acc.api_key}</b></span>
                                 <span>Leverage: <b>${acc.leverage}x</b></span>
                                 <span>Trade Size: <b>${sizingValue} (${sizingLabel})</b></span>
+                                <span>Loss Limit: <b>${lossLimitText}</b></span>
                             </div>
                         </div>
                         <div class="account-actions">
                             <span class="balance-badge" id="balance-${acc.id}">Balance: --</span>
                             <button class="btn btn-secondary btn-sm" onclick="checkBalance(${acc.id})">Check Balance</button>
-                            <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct}, '${acc.sizing_type}', ${acc.fixed_amount})">Edit</button>
+                            ${resetBreakerBtn}
+                            <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct}, '${acc.sizing_type}', ${acc.fixed_amount}, ${acc.daily_loss_limit})">Edit</button>
                             <label class="switch">
                                 <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
                                 <span class="slider"></span>
@@ -813,13 +1005,22 @@
             }
         }
 
-        // Fetch global settings (passphrase)
+        // Fetch global settings (passphrase and notifications)
         async function fetchSettings() {
             try {
                 const response = await fetch('/api/settings');
                 const settings = await response.json();
                 if (settings.passphrase) {
                     document.getElementById('passphrase').value = settings.passphrase;
+                }
+                document.getElementById('telegram-enabled-toggle').checked = settings.telegram_enabled === "true";
+                document.getElementById('telegram-token').value = settings.telegram_token || "";
+                document.getElementById('telegram-chat-id').value = settings.telegram_chat_id || "";
+                document.getElementById('discord-enabled-toggle').checked = settings.discord_enabled === "true";
+                document.getElementById('discord-webhook-url').value = settings.discord_webhook_url || "";
+                
+                if (settings.ws_url) {
+                    connectWebSocket(settings.ws_url);
                 }
             } catch (err) {
                 console.error("Failed to load settings:", err);
@@ -836,6 +1037,7 @@
         document.getElementById('add-account-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             
+            const limitVal = document.getElementById('daily-loss-limit').value;
             const payload = {
                 name: document.getElementById('name').value,
                 api_key: document.getElementById('api-key').value,
@@ -843,7 +1045,8 @@
                 leverage: parseInt(document.getElementById('leverage').value),
                 balance_buffer_pct: parseFloat(document.getElementById('buffer').value),
                 sizing_type: document.getElementById('sizing-type').value,
-                fixed_amount: parseFloat(document.getElementById('fixed-amount').value)
+                fixed_amount: parseFloat(document.getElementById('fixed-amount').value),
+                daily_loss_limit: limitVal === "" ? null : parseFloat(limitVal)
             };
             
             try {
@@ -860,6 +1063,7 @@
                     document.getElementById('buffer').value = "55";
                     document.getElementById('sizing-type').value = "percentage";
                     document.getElementById('fixed-amount').value = "10";
+                    document.getElementById('daily-loss-limit').value = "";
                     document.getElementById('buffer-group').style.display = 'block';
                     document.getElementById('fixed-amount-group').style.display = 'none';
                     fetchAccounts();
@@ -891,6 +1095,78 @@
                 showToast("Server error occurred", false);
             }
         });
+
+        async function saveNotificationSettings() {
+            const telegram_enabled = document.getElementById('telegram-enabled-toggle').checked ? "true" : "false";
+            const telegram_token = document.getElementById('telegram-token').value;
+            const telegram_chat_id = document.getElementById('telegram-chat-id').value;
+            const discord_enabled = document.getElementById('discord-enabled-toggle').checked ? "true" : "false";
+            const discord_webhook_url = document.getElementById('discord-webhook-url').value;
+            
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        telegram_enabled,
+                        telegram_token,
+                        telegram_chat_id,
+                        discord_enabled,
+                        discord_webhook_url
+                    })
+                });
+                
+                if (response.ok) {
+                    showToast("Notification settings saved successfully!");
+                } else {
+                    showToast("Failed to save settings", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+
+        async function testNotifications() {
+            const btn = document.getElementById('test-notifications-btn');
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = "Sending...";
+            try {
+                // Save settings first to make sure they are current in database
+                const telegram_enabled = document.getElementById('telegram-enabled-toggle').checked ? "true" : "false";
+                const telegram_token = document.getElementById('telegram-token').value;
+                const telegram_chat_id = document.getElementById('telegram-chat-id').value;
+                const discord_enabled = document.getElementById('discord-enabled-toggle').checked ? "true" : "false";
+                const discord_webhook_url = document.getElementById('discord-webhook-url').value;
+                
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        telegram_enabled,
+                        telegram_token,
+                        telegram_chat_id,
+                        discord_enabled,
+                        discord_webhook_url
+                    })
+                });
+
+                const response = await fetch('/api/notifications/test', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    showToast("Test notification dispatched!");
+                } else {
+                    showToast("Failed to send test notification", false);
+                }
+            } catch (err) {
+                showToast("Error occurred testing alerts", false);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        }
 
         // Toggle active status
         async function toggleAccount(id, is_active) {
@@ -961,13 +1237,14 @@
             document.getElementById(`edit-fixed-group-${id}`).style.display = isFixed ? 'block' : 'none';
         }
 
-        function editAccount(id, name, leverage, buffer, sizing_type = 'percentage', fixed_amount = 10.0) {
+        function editAccount(id, name, leverage, buffer, sizing_type = 'percentage', fixed_amount = 10.0, daily_loss_limit = null) {
             const row = document.getElementById(`row-${id}`);
             if (!row) return;
             
             row.dataset.originalHtml = row.innerHTML;
             
             const isFixed = sizing_type === 'fixed';
+            const limitVal = (daily_loss_limit !== null && daily_loss_limit !== undefined && daily_loss_limit !== 'null') ? daily_loss_limit : '';
             
             row.innerHTML = `
                 <div class="account-info" style="width: 100%;">
@@ -995,6 +1272,10 @@
                             <label style="font-size: 0.75rem;">Margin Amount</label>
                             <input type="number" id="edit-fixed-amount-${id}" value="${fixed_amount}" min="0.001" step="any" required style="padding: 0.4rem; font-size: 0.9rem;">
                         </div>
+                        <div class="form-group" id="edit-loss-limit-group-${id}" style="width: 100px;">
+                            <label style="font-size: 0.75rem;">Loss Limit (USD)</label>
+                            <input type="number" id="edit-loss-limit-${id}" value="${limitVal}" placeholder="No Limit" min="0.01" step="any" style="padding: 0.4rem; font-size: 0.9rem;">
+                        </div>
                         <div class="form-group" style="flex: 2; min-width: 180px;">
                             <label style="font-size: 0.75rem;">API Key</label>
                             <input type="text" id="edit-api-key-${id}" placeholder="Leave blank to keep current" style="padding: 0.4rem; font-size: 0.9rem;">
@@ -1018,6 +1299,7 @@
             const balance_buffer_pct = parseFloat(document.getElementById(`edit-buffer-${id}`).value);
             const sizing_type = document.getElementById(`edit-sizing-type-${id}`).value;
             const fixed_amount = parseFloat(document.getElementById(`edit-fixed-amount-${id}`).value);
+            const loss_limit_val = document.getElementById(`edit-loss-limit-${id}`).value;
             const api_key = document.getElementById(`edit-api-key-${id}`).value;
             const api_secret = document.getElementById(`edit-api-secret-${id}`).value;
             
@@ -1026,7 +1308,8 @@
                 leverage,
                 balance_buffer_pct,
                 sizing_type,
-                fixed_amount
+                fixed_amount,
+                daily_loss_limit: loss_limit_val === "" ? null : parseFloat(loss_limit_val)
             };
             if (api_key) payload.api_key = api_key;
             if (api_secret) payload.api_secret = api_secret;
@@ -1395,7 +1678,7 @@
                             <td style="padding: 1rem;">${sideBadge}</td>
                             <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${pos.size}</td>
                             <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.entry_price.toFixed(2)}</td>
-                            <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.mark_price.toFixed(2)}</td>
+                            <td class="mark-price-${pos.symbol}" style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.mark_price.toFixed(2)}</td>
                             <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${pos.margin.toFixed(2)}</td>
                             <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">${pos.leverage}x</td>
                             <td style="padding: 1rem; font-weight: 600; color: ${pnlColor}; font-size: 0.9rem;">
@@ -1413,6 +1696,402 @@
                 console.error("Failed to load PnL data:", err);
             }
         }
+
+        // ----------------- WEBHOOK PLAYGROUND FUNCTIONS -----------------
+        function togglePlayQtyOverride() {
+            const override = document.getElementById('play-qty-override').checked;
+            document.getElementById('play-qty-group').style.display = override ? 'block' : 'none';
+            generatePlayload();
+        }
+
+        function updateSimulateButtonText() {
+            const live = document.getElementById('play-live-execute').checked;
+            const btn = document.getElementById('trigger-sandbox-btn');
+            if (live) {
+                btn.innerText = "Execute Live Order";
+                btn.className = "btn btn-danger";
+            } else {
+                btn.innerText = "Run Simulation";
+                btn.className = "btn btn-primary";
+            }
+        }
+
+        function generatePlayload() {
+            const ticker = document.getElementById('play-ticker').value;
+            const action = document.getElementById('play-action').value;
+            const override = document.getElementById('play-qty-override').checked;
+            const qty = override ? parseFloat(document.getElementById('play-qty').value) : null;
+            
+            // We pull the passphrase from the Global settings field
+            const passphrase = document.getElementById('passphrase').value || "my_secure_passphrase";
+
+            const payload = {
+                ticker: ticker,
+                action: action,
+                passphrase: passphrase
+            };
+
+            if (override && qty !== null && !isNaN(qty)) {
+                payload.quantity = qty;
+            }
+
+            document.getElementById('play-payload-box').innerText = JSON.stringify(payload, null, 4);
+        }
+
+        function copyPlayload() {
+            const text = document.getElementById('play-payload-box').innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast("Payload JSON copied to clipboard!");
+            }).catch(err => {
+                showToast("Failed to copy", false);
+            });
+        }
+
+        async function triggerSandbox() {
+            const btn = document.getElementById('trigger-sandbox-btn');
+            const consoleBox = document.getElementById('sandbox-console');
+            
+            const ticker = document.getElementById('play-ticker').value;
+            const action = document.getElementById('play-action').value;
+            const override = document.getElementById('play-qty-override').checked;
+            const qty = override ? parseFloat(document.getElementById('play-qty').value) : null;
+            const live = document.getElementById('play-live-execute').checked;
+            const passphrase = document.getElementById('passphrase').value;
+            
+            if (!passphrase) {
+                showToast("Save/enter passphrase under Global Settings first!", false);
+                return;
+            }
+
+            const payload = {
+                ticker: ticker,
+                action: action,
+                passphrase: passphrase,
+                live_execute: live
+            };
+
+            if (override && qty !== null && !isNaN(qty)) {
+                payload.quantity = qty;
+            }
+
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = live ? "Executing live order..." : "Running simulation...";
+            consoleBox.innerHTML = `[${new Date().toLocaleTimeString()}] Contacting Flask simulation API...\n`;
+
+            try {
+                const response = await fetch('/api/simulate-webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    if (live) {
+                        consoleBox.innerHTML += `\n[SUCCESS] Live execution thread started.\nDetails: ${result.details}\n\nCheck the "Trade Logs" tab or your Telegram/Discord channel for status updates.`;
+                        showToast("Live trade execution triggered!");
+                    } else {
+                        consoleBox.innerHTML += `\n[SUCCESS] Simulation complete.\nTicker: ${result.ticker}\nSymbol Resolved: ${result.symbol} (Lot Size: ${result.contract_value})\n\n`;
+                        result.results.forEach(r => {
+                            const statusEmoji = r.success ? "🟢" : "🔴";
+                            consoleBox.innerHTML += `${statusEmoji} Account: ${r.account}\n   ${r.message}\n\n`;
+                        });
+                        showToast("Simulation run finished!");
+                    }
+                } else {
+                    consoleBox.innerHTML += `\n[ERROR] API request failed.\nCode: ${response.status}\nMessage: ${result.message || JSON.stringify(result)}`;
+                    showToast(result.message || "Failed to trigger sandbox", false);
+                }
+            } catch (err) {
+                consoleBox.innerHTML += `\n[CRITICAL ERROR] Network connection failed: ${err.message}`;
+                showToast("Network/Server connection failed", false);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+                consoleBox.scrollTop = consoleBox.scrollHeight;
+            }
+        }
+
+        async function resetBreaker(id) {
+            try {
+                const response = await fetch(`/api/accounts/${id}/reset-breaker`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showToast("Circuit breaker reset successfully!");
+                    fetchAccounts();
+                } else {
+                    showToast(result.message || "Failed to reset circuit breaker", false);
+                }
+            } catch (err) {
+                console.error("Failed to reset circuit breaker:", err);
+                showToast("Network/Server connection failed", false);
+            }
+        }
+
+        async function fetchAnalytics() {
+            try {
+                const response = await fetch('/api/analytics');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Update KPI Metrics
+                    const netProfitEl = document.getElementById('metric-net-profit');
+                    netProfitEl.innerText = (data.metrics.net_profit >= 0 ? '+' : '') + '$' + data.metrics.net_profit.toFixed(2);
+                    netProfitEl.style.color = data.metrics.net_profit >= 0 ? 'var(--success)' : 'var(--danger)';
+                    
+                    document.getElementById('metric-win-rate').innerText = data.metrics.win_rate.toFixed(1) + '%';
+                    document.getElementById('metric-profit-factor').innerText = data.metrics.profit_factor.toFixed(2);
+                    document.getElementById('metric-sharpe-ratio').innerText = data.metrics.sharpe_ratio.toFixed(2);
+                    document.getElementById('metric-recovery-factor').innerText = data.metrics.recovery_factor.toFixed(2);
+                    document.getElementById('metric-total-trades').innerText = data.metrics.total_trades;
+
+                    // 1. Portfolio Equity Curve
+                    const equityOptions = {
+                        chart: {
+                            type: 'area',
+                            height: 350,
+                            background: 'transparent',
+                            foreColor: '#9ca3af',
+                            toolbar: { show: false }
+                        },
+                        stroke: { curve: 'smooth', width: 2 },
+                        fill: {
+                            type: 'gradient',
+                            gradient: {
+                                shadeIntensity: 1,
+                                opacityFrom: 0.45,
+                                opacityTo: 0.05,
+                                stops: [0, 100]
+                            }
+                        },
+                        colors: ['#a855f7'],
+                        series: [{
+                            name: 'Cumulative Profit (USD)',
+                            data: data.series_pnl.map(pt => ({ x: pt.x, y: parseFloat(pt.y) }))
+                        }],
+                        xaxis: {
+                            type: 'category',
+                            labels: {
+                                rotate: -45,
+                                maxHeight: 60,
+                                style: { fontSize: '10px' }
+                            }
+                        },
+                        yaxis: {
+                            labels: {
+                                formatter: val => '$' + val.toFixed(2)
+                            }
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)' },
+                        tooltip: { theme: 'dark' }
+                    };
+
+                    if (window.equityChart) {
+                        window.equityChart.destroy();
+                    }
+                    window.equityChart = new ApexCharts(document.querySelector("#chart-equity"), equityOptions);
+                    window.equityChart.render();
+
+                    // 2. Drawdowns Curve
+                    const drawdownOptions = {
+                        chart: {
+                            type: 'area',
+                            height: 350,
+                            background: 'transparent',
+                            foreColor: '#9ca3af',
+                            toolbar: { show: false }
+                        },
+                        stroke: { curve: 'smooth', width: 2 },
+                        fill: {
+                            type: 'gradient',
+                            gradient: {
+                                shadeIntensity: 1,
+                                opacityFrom: 0.4,
+                                opacityTo: 0.05,
+                                stops: [0, 100]
+                            }
+                        },
+                        colors: ['#ef4444'],
+                        series: [{
+                            name: 'Peak Drawdown (%)',
+                            data: data.series_drawdown.map(pt => ({ x: pt.x, y: parseFloat(pt.y) }))
+                        }],
+                        xaxis: {
+                            type: 'category',
+                            labels: {
+                                rotate: -45,
+                                maxHeight: 60,
+                                style: { fontSize: '10px' }
+                            }
+                        },
+                        yaxis: {
+                            labels: {
+                                formatter: val => val.toFixed(2) + '%'
+                            }
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)' },
+                        tooltip: { theme: 'dark' }
+                    };
+
+                    if (window.drawdownChart) {
+                        window.drawdownChart.destroy();
+                    }
+                    window.drawdownChart = new ApexCharts(document.querySelector("#chart-drawdown"), drawdownOptions);
+                    window.drawdownChart.render();
+
+                    // 3. Time-of-day Profitability Heatmap
+                    const heatmapOptions = {
+                        chart: {
+                            type: 'heatmap',
+                            height: 380,
+                            background: 'transparent',
+                            foreColor: '#9ca3af',
+                            toolbar: { show: false }
+                        },
+                        plotOptions: {
+                            heatmap: {
+                                shadeIntensity: 0.5,
+                                radius: 2,
+                                useDirectColors: false,
+                                colorScale: {
+                                    ranges: [
+                                        { from: -1000000, to: -0.0001, name: 'Loss', color: '#ef4444' },
+                                        { from: 0, to: 0, name: 'Flat', color: '#374151' },
+                                        { from: 0.0001, to: 1000000, name: 'Profit', color: '#10b981' }
+                                    ]
+                                }
+                            }
+                        },
+                        dataLabels: { enabled: false },
+                        series: data.heatmap,
+                        xaxis: {
+                            type: 'category',
+                            title: { text: 'Hour of Day (UTC)', style: { color: '#9ca3af' } }
+                        },
+                        grid: { borderColor: 'rgba(255,255,255,0.06)' },
+                        tooltip: {
+                            theme: 'dark',
+                            y: {
+                                formatter: val => '$' + val.toFixed(4)
+                            }
+                        }
+                    };
+
+                    if (window.heatmapChart) {
+                        window.heatmapChart.destroy();
+                    }
+                    window.heatmapChart = new ApexCharts(document.querySelector("#chart-heatmap"), heatmapOptions);
+                    window.heatmapChart.render();
+                } else {
+                    showToast("Failed to load analytics: " + data.message, false);
+                }
+            } catch (err) {
+                console.error("Failed to load analytics:", err);
+                showToast("Network error loading analytics", false);
+            }
+        }
+
+        let ws = null;
+        function updateSymbolPrice(symbol, price) {
+            const normalizedSymbol = symbol.replace('.P', '');
+            const elements = document.querySelectorAll(`.mark-price-${normalizedSymbol}`);
+            elements.forEach(el => {
+                const oldPrice = parseFloat(el.innerText.replace('$', ''));
+                el.innerText = `$${price.toFixed(2)}`;
+                if (!isNaN(oldPrice)) {
+                    if (price > oldPrice) {
+                        el.style.color = 'var(--success)';
+                        setTimeout(() => { el.style.color = 'var(--text-secondary)'; }, 500);
+                    } else if (price < oldPrice) {
+                        el.style.color = 'var(--danger)';
+                        setTimeout(() => { el.style.color = 'var(--text-secondary)'; }, 500);
+                    }
+                }
+            });
+        }
+
+        function connectWebSocket(wsUrl) {
+            if (ws) {
+                try { ws.close(); } catch(e) {}
+            }
+            ws = new WebSocket(wsUrl);
+            ws.onopen = () => {
+                console.log("WebSocket connected to", wsUrl);
+                ws.send(JSON.stringify({
+                    "type": "subscribe",
+                    "payload": {
+                        "channels": [
+                            { "name": "ticker", "symbols": ["ETHUSD.P", "BTCUSD.P"] }
+                        ]
+                    }
+                }));
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg && (msg.type === "ticker" || msg.channel === "ticker")) {
+                        const data = msg.data || msg;
+                        const symbol = data.symbol;
+                        const markPrice = parseFloat(data.mark_price || data.last_price || data.price);
+                        if (symbol && !isNaN(markPrice)) {
+                            updateSymbolPrice(symbol, markPrice);
+                        }
+                    }
+                } catch (e) {
+                    console.error("Error parsing WS message:", e);
+                }
+            };
+            ws.onclose = () => {
+                console.log("WebSocket connection closed. Reconnecting in 5s...");
+                setTimeout(() => connectWebSocket(wsUrl), 5000);
+            };
+            ws.onerror = (err) => {
+                console.error("WebSocket error:", err);
+            };
+        }
+
+        async function checkApiLatency() {
+            const start = performance.now();
+            try {
+                const response = await fetch('/api/settings');
+                if (response.ok) {
+                    const end = performance.now();
+                    const latency = Math.round(end - start);
+                    
+                    const dot = document.getElementById('latency-dot');
+                    const text = document.getElementById('latency-text');
+                    if (dot && text) {
+                        text.innerText = `API Latency: ${latency} ms`;
+                        if (latency < 150) {
+                            dot.style.backgroundColor = 'var(--success)';
+                            dot.style.boxShadow = '0 0 8px var(--success)';
+                        } else if (latency < 400) {
+                            dot.style.backgroundColor = '#f59e0b';
+                            dot.style.boxShadow = '0 0 8px #f59e0b';
+                        } else {
+                            dot.style.backgroundColor = 'var(--danger)';
+                            dot.style.boxShadow = '0 0 8px var(--danger)';
+                        }
+                    }
+                }
+            } catch (err) {
+                const dot = document.getElementById('latency-dot');
+                const text = document.getElementById('latency-text');
+                if (dot && text) {
+                    text.innerText = 'API Offline';
+                    dot.style.backgroundColor = 'var(--danger)';
+                    dot.style.boxShadow = '0 0 8px var(--danger)';
+                }
+            }
+        }
+        
+        // Start latency checking
+        setInterval(checkApiLatency, 15000);
+        checkApiLatency();
 
         // Initialize lists
         fetchAccounts();
