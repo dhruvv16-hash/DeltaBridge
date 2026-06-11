@@ -704,6 +704,38 @@ def export_journal():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route("/api/test-closed-positions", methods=["GET"])
+def test_closed_positions():
+    try:
+        active_accounts = Account.query.filter_by(is_active=True).all()
+        if not active_accounts:
+            return jsonify({"status": "error", "message": "No active accounts"}), 400
+            
+        acc = active_accounts[0]
+        client = DeltaClient(
+            api_key=acc.api_key,
+            api_secret=acc.api_secret,
+            base_url=Config.BASE_URL
+        )
+        
+        # Test 1: GET /v2/positions/closed
+        r1 = client._request("GET", "/v2/positions/closed", query_string="limit=5", is_private=True)
+        
+        # Test 2: GET /v2/fills
+        r2 = client._request("GET", "/v2/fills", query_string="limit=5", is_private=True)
+        
+        # Test 3: GET /v2/orders/history
+        r3 = client._request("GET", "/v2/orders/history", query_string="limit=5", is_private=True)
+        
+        return jsonify({
+            "positions_closed_response": r1,
+            "fills_response": r2,
+            "orders_history_response": r3
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/api/email-settings", methods=["GET"])
 def get_email_settings():
     def get_setting(key, default=""):
