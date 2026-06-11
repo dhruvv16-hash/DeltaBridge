@@ -122,6 +122,7 @@ def run_strategy_for_account(app, account, client):
 
     # 4. MONITOR ACTIVE POSITION
     if state.position_size > 0:  # Active Long Position
+        entry_price_val = state.entry_price if state.entry_price else current_price
         # TP1 check (50% position close)
         if current_price >= state.tp1_price and not state.tp1_hit:
             close_qty = int(math.floor(state.position_size * 0.5))
@@ -133,7 +134,8 @@ def run_strategy_for_account(app, account, client):
                         # Move Stop Loss to break-even (entry price)
                         state.current_sl = max(state.current_sl, state.entry_price)
                     db.session.commit()
-                    send_strategy_notification(app, f"🟢 Local Strategy: Long TP1 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f}. SL moved to Break-Even ({state.current_sl:.2f}).")
+                    pnl_val = (current_price - entry_price_val) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟢 Local Strategy: Long TP1 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD). SL moved to Break-Even ({state.current_sl:.2f}).")
                     
         # TP2 check (30% position close)
         if current_price >= state.tp2_price and not state.tp2_hit:
@@ -143,7 +145,8 @@ def run_strategy_for_account(app, account, client):
                 if res.get("success"):
                     state.tp2_hit = True
                     db.session.commit()
-                    send_strategy_notification(app, f"🟢 Local Strategy: Long TP2 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f}.")
+                    pnl_val = (current_price - entry_price_val) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟢 Local Strategy: Long TP2 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).")
 
         # Stop Loss check
         if current_price <= state.current_sl:
@@ -151,7 +154,8 @@ def run_strategy_for_account(app, account, client):
             if close_qty > 0:
                 res = client.place_order(product_id, size=close_qty, side="sell", order_type="market_order", reduce_only=True)
                 if res.get("success"):
-                    send_strategy_notification(app, f"🔴 Local Strategy: Long SL Hit [{account.name}]", f"Position stopped out. Closed remaining {close_qty} contracts at {current_price:.2f}.", 15680580)
+                    pnl_val = (current_price - entry_price_val) * close_qty * contract_val
+                    send_strategy_notification(app, f"🔴 Local Strategy: Long SL Hit [{account.name}]", f"Position stopped out. Closed remaining {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).", 15680580)
             state.position_size = 0.0
             state.entry_price = None
             state.current_sl = None
@@ -164,7 +168,8 @@ def run_strategy_for_account(app, account, client):
             if close_qty > 0:
                 res = client.place_order(product_id, size=close_qty, side="sell", order_type="market_order", reduce_only=True)
                 if res.get("success"):
-                    send_strategy_notification(app, f"🟡 Local Strategy: Long ZLSMA Flip Exit [{account.name}]", f"ZLSMA flipped bearish. Closed remaining {close_qty} contracts at {current_price:.2f}.", 15549011)
+                    pnl_val = (current_price - entry_price_val) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟡 Local Strategy: Long ZLSMA Flip Exit [{account.name}]", f"ZLSMA flipped bearish. Closed remaining {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).", 15549011)
             state.position_size = 0.0
             db.session.commit()
             return
@@ -175,12 +180,14 @@ def run_strategy_for_account(app, account, client):
             if close_qty > 0:
                 res = client.place_order(product_id, size=close_qty, side="sell", order_type="market_order", reduce_only=True)
                 if res.get("success"):
-                    send_strategy_notification(app, f"🟡 Local Strategy: Long BSL Liquidity Exit [{account.name}]", f"BSL liquidity level created after TP1. Closed remaining {close_qty} contracts at {current_price:.2f}.", 15549011)
+                    pnl_val = (current_price - entry_price_val) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟡 Local Strategy: Long BSL Liquidity Exit [{account.name}]", f"BSL liquidity level created after TP1. Closed remaining {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).", 15549011)
             state.position_size = 0.0
             db.session.commit()
             return
 
     elif state.position_size < 0:  # Active Short Position
+        entry_price_val = state.entry_price if state.entry_price else current_price
         # TP1 check (50% position close)
         if current_price <= state.tp1_price and not state.tp1_hit:
             close_qty = int(math.floor(abs(state.position_size) * 0.5))
@@ -192,7 +199,8 @@ def run_strategy_for_account(app, account, client):
                         # Move Stop Loss to break-even (entry price)
                         state.current_sl = min(state.current_sl, state.entry_price)
                     db.session.commit()
-                    send_strategy_notification(app, f"🟢 Local Strategy: Short TP1 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f}. SL moved to Break-Even ({state.current_sl:.2f}).")
+                    pnl_val = (entry_price_val - current_price) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟢 Local Strategy: Short TP1 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD). SL moved to Break-Even ({state.current_sl:.2f}).")
                     
         # TP2 check (30% position close)
         if current_price <= state.tp2_price and not state.tp2_hit:
@@ -202,7 +210,8 @@ def run_strategy_for_account(app, account, client):
                 if res.get("success"):
                     state.tp2_hit = True
                     db.session.commit()
-                    send_strategy_notification(app, f"🟢 Local Strategy: Short TP2 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f}.")
+                    pnl_val = (entry_price_val - current_price) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟢 Local Strategy: Short TP2 Hit [{account.name}]", f"Closed {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).")
 
         # Stop Loss check
         if current_price >= state.current_sl:
@@ -210,7 +219,8 @@ def run_strategy_for_account(app, account, client):
             if close_qty > 0:
                 res = client.place_order(product_id, size=close_qty, side="buy", order_type="market_order", reduce_only=True)
                 if res.get("success"):
-                    send_strategy_notification(app, f"🔴 Local Strategy: Short SL Hit [{account.name}]", f"Position stopped out. Closed remaining {close_qty} contracts at {current_price:.2f}.", 15680580)
+                    pnl_val = (entry_price_val - current_price) * close_qty * contract_val
+                    send_strategy_notification(app, f"🔴 Local Strategy: Short SL Hit [{account.name}]", f"Position stopped out. Closed remaining {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).", 15680580)
             state.position_size = 0.0
             state.entry_price = None
             state.current_sl = None
@@ -223,7 +233,8 @@ def run_strategy_for_account(app, account, client):
             if close_qty > 0:
                 res = client.place_order(product_id, size=close_qty, side="buy", order_type="market_order", reduce_only=True)
                 if res.get("success"):
-                    send_strategy_notification(app, f"🟡 Local Strategy: Short ZLSMA Flip Exit [{account.name}]", f"ZLSMA flipped bullish. Closed remaining {close_qty} contracts at {current_price:.2f}.", 15549011)
+                    pnl_val = (entry_price_val - current_price) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟡 Local Strategy: Short ZLSMA Flip Exit [{account.name}]", f"ZLSMA flipped bullish. Closed remaining {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).", 15549011)
             state.position_size = 0.0
             db.session.commit()
             return
@@ -234,7 +245,8 @@ def run_strategy_for_account(app, account, client):
             if close_qty > 0:
                 res = client.place_order(product_id, size=close_qty, side="buy", order_type="market_order", reduce_only=True)
                 if res.get("success"):
-                    send_strategy_notification(app, f"🟡 Local Strategy: Short SSL Liquidity Exit [{account.name}]", f"SSL liquidity level created after TP1. Closed remaining {close_qty} contracts at {current_price:.2f}.", 15549011)
+                    pnl_val = (entry_price_val - current_price) * close_qty * contract_val
+                    send_strategy_notification(app, f"🟡 Local Strategy: Short SSL Liquidity Exit [{account.name}]", f"SSL liquidity level created after TP1. Closed remaining {close_qty} contracts at {current_price:.2f} (PnL: {pnl_val:+.2f} USD).", 15549011)
             state.position_size = 0.0
             db.session.commit()
             return

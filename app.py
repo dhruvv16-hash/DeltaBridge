@@ -1672,6 +1672,14 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
                         results.append(account_result)
                         continue
 
+                    # Calculate estimated PnL before closing
+                    entry_px = float(pos.get("entry_price") or pos.get("avg_entry_price") or 0)
+                    upnl = pos.get("unrealized_pnl") or pos.get("upnl") or pos.get("pnl") or 0.0
+                    try:
+                        pnl_val = float(upnl)
+                    except (ValueError, TypeError):
+                        pnl_val = 0.0
+
                     close_side = "sell" if is_long else "buy"
                     res = client.place_order(
                         product_id=product_id,
@@ -1682,8 +1690,25 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
                     )
 
                     if res.get("success"):
-                        logger.info(f"Successfully closed position for {symbol} on account '{acc_name}'. Order ID: {res.get('result', {}).get('id')}")
-                        account_result.update({"success": True, "response": res})
+                        # Try to calculate exact PnL from average fill price
+                        order_res = res.get("result", {})
+                        try:
+                            exit_px = float(order_res.get("average_fill_price") or 0.0)
+                        except (ValueError, TypeError):
+                            exit_px = 0.0
+                            
+                        if entry_px > 0 and exit_px > 0:
+                            contract_val = float(product.get("contract_value", 0.01))
+                            direction = 1 if is_long else -1
+                            pnl_val = (exit_px - entry_px) * pos_size * contract_val * direction
+
+                        pnl_str = f"PnL: {pnl_val:+.2f} USD"
+                        logger.info(f"Successfully closed position for {symbol} on account '{acc_name}'. Order ID: {order_res.get('id')} - {pnl_str}")
+                        account_result.update({
+                            "success": True,
+                            "message": f"Closed position of {pos_size} Lots. {pnl_str}",
+                            "response": res
+                        })
                     else:
                         logger.error(f"Failed to close position on account '{acc_name}': {res}")
                         account_result.update({"success": False, "message": "Delta API Order Placement Failed", "details": res})
