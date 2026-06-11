@@ -83,48 +83,82 @@ Because Render's free tier spins down if no requests are received for 15 minutes
 
 ## 5. Configure TradingView Alerts
 
-When configuring alerts on your TradingView strategy:
+When configuring alerts on your TradingView strategy, you have two options: **Fixed Sizing (via TradingView Alert Box)** or **Dynamic Quantity Sizing (via Pine Script alert_message)**.
 
-### Notifications Tab
-1. Check the **Webhook URL** box.
-2. Paste: `https://your-bot-url.onrender.com/webhook` (replace with your actual Render URL).
+### Notifications Tab (Both Options)
+1. Check the **Webhook URL** box in your TradingView alert settings.
+2. Paste: `https://your-bot-url.onrender.com/webhook?passphrase=your_secure_passphrase` (replace with your actual Render URL and passphrase).
 
-### Settings / Message Box
-Paste the exact JSON payload, filling in your passphrase. You can configure individual alerts or let the strategy populate values dynamically.
+---
 
-#### A. Entry Messages
+### Option A: Dynamic Sizing via Pine Script (Recommended for Compounding Strategies)
+To pass dynamically calculated quantities (e.g. from your compounding risk strategy `potentialLongQty`/`potentialShortQty`), you can define your alert messages directly inside your Pine Script and use `{{strategy.order.alert_message}}` in the TradingView alert settings.
+
+#### 1. In your Pine Script:
+Define your `buyMsg` and `sellMsg` after calculating your entry quantities:
+```pinescript
+// Calculate your dynamic quantities
+float potentialLongSlDist  = close - longStop
+float potentialLongQty     = riskDollars / math.max(potentialLongSlDist,  syminfo.mintick)
+float potentialShortSlDist = shortStop - close
+float potentialShortQty    = riskDollars / math.max(potentialShortSlDist, syminfo.mintick)
+
+// Construct JSON alert messages with quantity
+string buyMsg  = '{"action":"buy","ticker":"'  + syminfo.ticker + '","quantity":' + str.tostring(potentialLongQty) + '}'
+string sellMsg = '{"action":"sell","ticker":"' + syminfo.ticker + '","quantity":' + str.tostring(potentialShortQty) + '}'
+
+string closeLongMsg  = '{"action":"close_long","ticker":"'  + syminfo.ticker + '"}'
+string closeShortMsg = '{"action":"close_short","ticker":"' + syminfo.ticker + '"}'
+
+// Pass them to alert_message
+if longCondition
+    strategy.entry('Long', strategy.long, qty=potentialLongQty, alert_message=buyMsg)
+
+if shortCondition
+    strategy.entry('Short', strategy.short, qty=potentialShortQty, alert_message=sellMsg)
+```
+
+#### 2. In the TradingView Alert settings:
+Set the **Message** box to:
+```json
+{{strategy.order.alert_message}}
+```
+*When the strategy triggers an entry, it passes the dynamically constructed JSON (including the precise base currency quantity) directly to the webhook.*
+
+---
+
+### Option B: Fixed Sizing (via TradingView Alert Settings)
+If you prefer not to modify your Pine Script or want the bot to determine sizing automatically based on your database configuration (fixed margin or percentage), paste the JSON payload directly into the TradingView Alert **Message** box:
+
+#### 1. Entry Messages
 * **Buy Alert Message:**
   ```json
   {
     "action": "buy",
-    "ticker": "{{ticker}}",
-    "passphrase": "your_secure_passphrase"
+    "ticker": "{{ticker}}"
   }
   ```
 * **Sell Alert Message:**
   ```json
   {
     "action": "sell",
-    "ticker": "{{ticker}}",
-    "passphrase": "your_secure_passphrase"
+    "ticker": "{{ticker}}"
   }
   ```
 
-#### B. Exit Messages
+#### 2. Exit Messages
 * **Close Long Message:**
   ```json
   {
     "action": "close_long",
-    "ticker": "{{ticker}}",
-    "passphrase": "your_secure_passphrase"
+    "ticker": "{{ticker}}"
   }
   ```
 * **Close Short Message:**
   ```json
   {
     "action": "close_short",
-    "ticker": "{{ticker}}",
-    "passphrase": "your_secure_passphrase"
+    "ticker": "{{ticker}}"
   }
   ```
 

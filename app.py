@@ -66,14 +66,16 @@ def parse_email_signal(body, subject):
             data = json.loads(json_match.group(1))
             ticker = data.get("ticker") or data.get("symbol")
             action = data.get("action", "").lower()
+            quantity = data.get("quantity") or data.get("qty")
             if ticker and action:
-                return ticker, action
+                return ticker, action, quantity
         except Exception:
             pass
             
     # 2. Key-Value pairs
     ticker = None
     action = None
+    quantity = None
     
     ticker_match = re.search(r'(?:ticker|symbol)\s*[:=]\s*["\']?([a-zA-Z0-9_:\.\/]+)["\']?', body, re.IGNORECASE)
     if ticker_match:
@@ -83,6 +85,13 @@ def parse_email_signal(body, subject):
     if action_match:
         action = action_match.group(1).lower()
         
+    qty_match = re.search(r'(?:quantity|qty)\s*[:=]\s*["\']?([0-9\.]+)["\']?', body, re.IGNORECASE)
+    if qty_match:
+        try:
+            quantity = float(qty_match.group(1))
+        except ValueError:
+            pass
+            
     # 3. Subject line parsing fallback
     if not ticker or not action:
         words = re.findall(r'\b[a-zA-Z0-9_\:\.\/]+\b', subject + " " + body)
@@ -94,7 +103,7 @@ def parse_email_signal(body, subject):
                 if not ticker:
                     ticker = word
                     
-    return ticker, action
+    return ticker, action, quantity
 
 def check_position_matches_action(account_data, ticker, action):
     try:
@@ -246,13 +255,13 @@ def email_polling_loop():
                                 if payload:
                                     body += payload.decode('utf-8', errors='ignore')
                                     
-                            ticker, action = parse_email_signal(body, subject_header)
+                            ticker, action, quantity = parse_email_signal(body, subject_header)
                             if not ticker or not action:
                                 logger.warning("Failed to extract ticker/action from email body.")
                                 continue
                                 
                             mail.store(mail_id, '+FLAGS', '\\Seen')
-                            logger.info(f"Email marked as read. Extracted signal: {action} {ticker}")
+                            logger.info(f"Email marked as read. Extracted signal: {action} {ticker} (Quantity: {quantity})")
                             
                             if not accounts_data:
                                 logger.warning("No accounts available to check position for email signal.")
@@ -272,7 +281,8 @@ def email_polling_loop():
                                 db.session.commit()
                             else:
                                 logger.warning(f"Double-Verification FAILED: No active position matches {action} {ticker} on Delta. Executing fallback...")
-                                execute_trades_background(accounts_data, ticker, action, source="email_fallback")
+                                payload_data = {"quantity": quantity} if quantity is not None else None
+                                execute_trades_background(accounts_data, ticker, action, source="email_fallback", payload=payload_data)
                                 
                 mail.logout()
         except Exception as e:
@@ -652,10 +662,10 @@ def get_account_balance(id):
 
 # ----------------- TRADING WEBHOOK ENDPOINT -----------------
 
-def execute_trades_background(accounts_data, ticker, action, source="webhook"):
+def execute_trades_background(accounts_data, ticker, action, source="webhook", payload=None):
     """Processes trading signals across all configured accounts in a background thread."""
     with app.app_context():
-        logger.info(f"Starting background trade execution for {ticker} (Action: {action}, Source: {source}) on {len(accounts_data)} accounts...")
+        logger.info(f"Starting background trade execution for {ticker} (Action: {action}, Source: {source}, Payload: {payload}) on {len(accounts_data)} accounts...")
         
         # Retrieve product details in background
         product = public_delta_client.get_product_by_symbol(ticker)
@@ -811,24 +821,9 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook"):
                         results.append(account_result)
                         continue
 
-                    # Calculate max lots based on account settings
-                    sizing_type = acc.get("sizing_type") or "percentage"
-                    fixed_amount_val = acc.get("fixed_amount")
-                    fixed_amount = float(fixed_amount_val) if fixed_amount_val is not None else 10.0
-                    
-                    if sizing_type == "fixed":
-                        if fixed_amount > balance:
-                            logger.warning(f"Insufficient balance on account '{acc_name}': Fixed Margin of {fixed_amount} {asset} exceeds balance {balance} {asset}.")
-                            account_result.update({"success": False, "message": f"Insufficient balance (need {fixed_amount} {asset}, have {balance} {asset})"})
-                            results.append(account_result)
-                            continue
-                        buying_power = fixed_amount * acc["leverage"]
-                        sizing_desc = f"Fixed Margin = {fixed_amount} {asset}"
-                    else:
-                        buffer_pct = float(acc.get("balance_buffer_pct", 55.0))
-                        buying_power = balance * acc["leverage"] * (buffer_pct / 100.0)
-                        sizing_desc = f"Buffer = {buffer_pct}%"
-                        
+                    # Calculate quantity and lots
+                    qty_lots = None
+                    sizing_desc = ""
                     lot_value_usd = price * contract_value
                     
                     if lot_value_usd <= 0:
@@ -837,9 +832,45 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook"):
                         results.append(account_result)
                         continue
                         
-                    qty_lots = int(math.floor(buying_power / lot_value_usd))
-                    
-                    logger.info(f"Dynamic Sizing details for account '{acc_name}': Balance = {balance} {asset}, Leverage = {acc['leverage']}x, "
+                    if payload and ("quantity" in payload or "qty" in payload):
+                        payload_qty = payload.get("quantity") or payload.get("qty")
+                        if payload_qty is not None:
+                            try:
+                                qty_base = float(payload_qty)
+                                qty_lots = int(math.floor(qty_base / contract_value))
+                                sizing_desc = f"Quantity from payload = {qty_base} (Lots = {qty_lots})"
+                            except (ValueError, TypeError) as e:
+                                logger.error(f"Invalid quantity parameter in payload: {payload_qty}. Falling back to account sizing.")
+                                
+                    if qty_lots is None:
+                        sizing_type = acc.get("sizing_type") or "percentage"
+                        fixed_amount_val = acc.get("fixed_amount")
+                        fixed_amount = float(fixed_amount_val) if fixed_amount_val is not None else 10.0
+                        
+                        if sizing_type == "fixed":
+                            if fixed_amount > balance:
+                                logger.warning(f"Insufficient balance on account '{acc_name}': Fixed Margin of {fixed_amount} {asset} exceeds balance {balance} {asset}.")
+                                account_result.update({"success": False, "message": f"Insufficient balance (need {fixed_amount} {asset}, have {balance} {asset})"})
+                                results.append(account_result)
+                                continue
+                            buying_power = fixed_amount * acc["leverage"]
+                            sizing_desc = f"Fixed Margin = {fixed_amount} {asset}"
+                        else:
+                            buffer_pct = float(acc.get("balance_buffer_pct", 55.0))
+                            buying_power = balance * acc["leverage"] * (buffer_pct / 100.0)
+                            sizing_desc = f"Buffer = {buffer_pct}%"
+                            
+                        qty_lots = int(math.floor(buying_power / lot_value_usd))
+                        
+                    # Required margin check
+                    required_margin = (qty_lots * lot_value_usd) / acc["leverage"]
+                    if required_margin > balance:
+                        logger.warning(f"Insufficient balance on account '{acc_name}': Required margin of {required_margin:.4f} {asset} for {qty_lots} lots exceeds available balance {balance} {asset}.")
+                        account_result.update({"success": False, "message": f"Insufficient balance (need {required_margin:.2f} {asset} margin, have {balance:.2f} {asset})"})
+                        results.append(account_result)
+                        continue
+                        
+                    logger.info(f"Sizing details for account '{acc_name}': Balance = {balance} {asset}, Leverage = {acc['leverage']}x, "
                                 f"{sizing_desc}, Lot USD Value = {lot_value_usd:.4f}, Calculated Qty = {qty_lots} Lots")
 
                     if qty_lots <= 0:
@@ -1029,13 +1060,14 @@ def webhook():
         # 5. Launch background thread for trade execution
         if os.getenv("FLASK_ENV") == "testing":
             # Run synchronously in testing to keep assertions deterministic
-            results = execute_trades_background(accounts_data, ticker, action, "webhook")
+            results = execute_trades_background(accounts_data, ticker, action, "webhook", payload)
             return jsonify({"status": "success", "results": results}), 200
         else:
             import threading
             thread = threading.Thread(
                 target=execute_trades_background,
-                args=(accounts_data, ticker, action, "webhook")
+                args=(accounts_data, ticker, action, "webhook"),
+                kwargs={"payload": payload}
             )
             thread.start()
 

@@ -345,28 +345,31 @@ class TestWebhookEndpoints(unittest.TestCase):
                 base_url=Config.BASE_URL
             )
     def test_email_parsing_heuristics(self):
-        """Verify email parsing correctly extracts ticker and action from different formats."""
+        """Verify email parsing correctly extracts ticker, action and quantity from different formats."""
         from app import parse_email_signal
         
         # Format 1: JSON body
-        body_json = 'Some text before\n{\n  "action": "buy",\n  "ticker": "ETHUSD.P"\n}\nSome text after'
+        body_json = 'Some text before\n{\n  "action": "buy",\n  "ticker": "ETHUSD.P",\n  "quantity": 0.25\n}\nSome text after'
         subject = "Alert triggered"
-        ticker, action = parse_email_signal(body_json, subject)
+        ticker, action, quantity = parse_email_signal(body_json, subject)
         self.assertEqual(ticker, "ETHUSD.P")
         self.assertEqual(action, "buy")
+        self.assertEqual(quantity, 0.25)
         
         # Format 2: Key-value text
-        body_kv = "Hello,\nTicker: BTCUSD.P\nAction: sell\nThanks"
-        ticker, action = parse_email_signal(body_kv, subject)
+        body_kv = "Hello,\nTicker: BTCUSD.P\nAction: sell\nQty: 0.005\nThanks"
+        ticker, action, quantity = parse_email_signal(body_kv, subject)
         self.assertEqual(ticker, "BTCUSD.P")
         self.assertEqual(action, "sell")
+        self.assertEqual(quantity, 0.005)
         
         # Format 3: Subject line fallback
         body_empty = "This is a custom alert mail body."
         subject_buy = "Buy ETHUSD.P Alert"
-        ticker, action = parse_email_signal(body_empty, subject_buy)
+        ticker, action, quantity = parse_email_signal(body_empty, subject_buy)
         self.assertEqual(ticker, "ETHUSD.P")
         self.assertEqual(action, "buy")
+        self.assertIsNone(quantity)
 
     @patch('app.DeltaClient')
     def test_trade_logging_in_database(self, mock_client_class):
@@ -683,6 +686,87 @@ class TestSizingModels(unittest.TestCase):
         results = response.get_json()["results"]
         self.assertFalse(results[0]["success"])
         self.assertIn("Insufficient balance (need 15.0 USD, have 10.0 USD)", results[0]["message"])
+        
+        # Assert order was NOT placed
+        mock_client.place_order.assert_not_called()
+
+    @patch('app.DeltaClient')
+    def test_payload_quantity_sizing_success(self, mock_client_class):
+        """Verify that passing quantity in webhook payload overrides default sizing and places order correctly."""
+        # 1. Create active account
+        acc = self.Account(
+            name="Payload Qty Account",
+            api_key="key_payload",
+            api_secret="secret_payload",
+            leverage=50,
+            is_active=True
+        )
+        self.db.session.add(acc)
+        self.db.session.commit()
+
+        # 2. Setup mock client response
+        mock_client = mock_client_class.return_value
+        mock_client.get_position.return_value = None
+        mock_client.get_ticker.return_value = {"mark_price": "2000"}
+        mock_client.get_available_balance.return_value = (10.0, "USD") # Available balance is $10.00
+        mock_client.place_order.return_value = {"success": True, "result": {"id": 222}}
+        
+        # 3. Post webhook with quantity parameter
+        # ETHUSD.P contract value is 0.01. So quantity of 0.25 ETH = 25 contracts/lots
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase",
+            "quantity": 0.25
+        })
+        
+        self.assertEqual(response.status_code, 200)
+        results = response.get_json()["results"]
+        self.assertTrue(results[0]["success"])
+        
+        # Verify place_order was called with 25 lots (0.25 / 0.01)
+        mock_client.place_order.assert_called_once_with(
+            product_id=27,
+            size=25,
+            side="buy",
+            order_type="market_order",
+            reduce_only=False
+        )
+
+    @patch('app.DeltaClient')
+    def test_payload_quantity_insufficient_margin(self, mock_client_class):
+        """Verify that if quantity from payload requires more margin than available, the trade is aborted."""
+        # 1. Create active account
+        acc = self.Account(
+            name="Payload Qty Overlimit",
+            api_key="key_payload2",
+            api_secret="secret_payload2",
+            leverage=10, # low leverage to increase margin required
+            is_active=True
+        )
+        self.db.session.add(acc)
+        self.db.session.commit()
+
+        # 2. Setup mock client response
+        mock_client = mock_client_class.return_value
+        mock_client.get_position.return_value = None
+        mock_client.get_ticker.return_value = {"mark_price": "2000"}
+        mock_client.get_available_balance.return_value = (10.0, "USD") # Available balance is $10.00
+        
+        # 3. Post webhook requesting huge quantity
+        # 0.1 ETH @ $2000 = $200 position value.
+        # Leverage = 10x -> Required margin = $20.00, which exceeds balance of $10.00
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase",
+            "quantity": 0.10
+        })
+        
+        self.assertEqual(response.status_code, 200)
+        results = response.get_json()["results"]
+        self.assertFalse(results[0]["success"])
+        self.assertIn("Insufficient balance", results[0]["message"])
         
         # Assert order was NOT placed
         mock_client.place_order.assert_not_called()
