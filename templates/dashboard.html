@@ -315,6 +315,8 @@
             border: 1px solid var(--border-color);
             border-radius: 12px;
             transition: var(--transition);
+            flex-wrap: wrap;
+            gap: 1rem;
         }
 
         .account-row:hover {
@@ -326,6 +328,8 @@
             display: flex;
             flex-direction: column;
             gap: 0.25rem;
+            flex: 1;
+            min-width: 280px;
         }
 
         .account-name {
@@ -339,6 +343,7 @@
             color: var(--text-secondary);
             display: flex;
             gap: 1.5rem;
+            flex-wrap: wrap;
         }
 
         .account-details span b {
@@ -349,6 +354,7 @@
             display: flex;
             align-items: center;
             gap: 1rem;
+            flex-wrap: wrap;
         }
 
         /* Balance badge styling */
@@ -967,6 +973,7 @@
                     const sizingLabel = acc.sizing_type === 'fixed' ? 'Fixed Margin' : 'Allocation';
                     const sizingValue = acc.sizing_type === 'fixed' ? `$${acc.fixed_amount.toFixed(2)}` : `${acc.balance_buffer_pct}%`;
                     const lossLimitText = acc.daily_loss_limit ? `$${acc.daily_loss_limit.toFixed(2)}` : 'No Limit';
+                    const apiKeyDisplay = acc.api_key.length > 12 ? acc.api_key.substring(0, 6) + '...' + acc.api_key.substring(acc.api_key.length - 4) : acc.api_key;
                     
                     let breakerBadge = '';
                     let resetBreakerBtn = '';
@@ -979,7 +986,7 @@
                         <div class="account-info">
                             <div class="account-name" style="display: flex; align-items: center; gap: 0.5rem;">${acc.name}${breakerBadge}</div>
                             <div class="account-details">
-                                <span>API Key: <b>${acc.api_key}</b></span>
+                                <span>API Key: <b>${apiKeyDisplay}</b></span>
                                 <span>Leverage: <b>${acc.leverage}x</b></span>
                                 <span>Trade Size: <b>${sizingValue} (${sizingLabel})</b></span>
                                 <span>Loss Limit: <b>${lossLimitText}</b></span>
@@ -1247,7 +1254,9 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    badge.innerText = `${data.balance} ${data.asset}`;
+                    const balNum = parseFloat(data.balance);
+                    const formattedBalance = isNaN(balNum) ? data.balance : balNum.toFixed(2);
+                    badge.innerText = `${formattedBalance} ${data.asset}`;
                     badge.classList.add('success');
                 } else {
                     badge.innerText = 'Error';
