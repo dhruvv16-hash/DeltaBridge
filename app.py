@@ -277,7 +277,9 @@ def email_polling_loop():
                         "api_key": Config.API_KEY,
                         "api_secret": Config.API_SECRET,
                         "leverage": Config.DEFAULT_LEVERAGE,
-                        "balance_buffer_pct": Config.BALANCE_BUFFER_PCT * 100.0
+                        "balance_buffer_pct": Config.BALANCE_BUFFER_PCT * 100.0,
+                        "sizing_type": "percentage",
+                        "fixed_amount": 10.0
                     }]
                     
                 for mail_id in mail_ids:
@@ -587,9 +589,9 @@ def simulate_webhook():
                         buying_power = acc.fixed_amount * acc.leverage
                         sizing_desc = f"Fixed Margin = {acc.fixed_amount} {asset}"
                     else:
-                        buying_power = balance * acc.leverage * (acc.balance_buffer_pct / 100.0)
-                        sizing_desc = f"Percentage Allocation = {acc.balance_buffer_pct}%"
-                        
+                        buffer_pct = float(acc.balance_buffer_pct)
+                        buying_power = balance * acc.leverage * (buffer_pct / 100.0)
+                        sizing_desc = f"Buffer = {buffer_pct}%"
                     qty_lots = int(math.floor(buying_power / lot_value_usd))
 
                 required_margin = (qty_lots * lot_value_usd) / acc.leverage
@@ -1794,7 +1796,7 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
                             buying_power = fixed_amount * acc["leverage"]
                             sizing_desc = f"Fixed Margin = {fixed_amount} {asset}"
                         else:
-                            buffer_pct = float(acc.get("balance_buffer_pct", 55.0))
+                            buffer_pct = float(acc.get("balance_buffer_pct", 95.0))
                             buying_power = balance * acc["leverage"] * (buffer_pct / 100.0)
                             sizing_desc = f"Buffer = {buffer_pct}%"
                             
@@ -1810,7 +1812,7 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
                         
                     logger.info(f"Sizing details for account '{acc_name}': Balance = {balance} {asset}, Leverage = {acc['leverage']}x, "
                                 f"{sizing_desc}, Lot USD Value = {lot_value_usd:.4f}, Calculated Qty = {qty_lots} Lots")
-
+ 
                     if qty_lots <= 0:
                         logger.warning(f"Insufficient balance ({balance} {asset}) for leverage {acc['leverage']}x to open even 1 lot on account '{acc_name}'.")
                         account_result.update({"success": False, "message": "Insufficient balance for 1 lot"})

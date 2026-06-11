@@ -52,7 +52,7 @@ sequenceDiagram
     participant Chat as Telegram / Discord
     
     TV ->> Flask: POST /webhook (passphrase, action, ticker)
-    Note over Flask: Extract & clean symbol (e.g., ETHUSD.P -> ETHUSD)
+    Note over Flask: Extract & clean symbol (e.g., BTCUSD.P -> BTCUSD)
     Flask ->> DB: Query settings (Validate passphrase & fetch active accounts)
     DB -->> Flask: Active accounts details (API Keys)
     
@@ -132,7 +132,7 @@ Configure these environment variables in your server configuration (or a local `
 | `PASSPHRASE` | Custom secure passphrase to authenticate webhooks | `your_secure_trading_passphrase` |
 | `DEFAULT_LEVERAGE` | Target leverage used to calculate dynamic sizing | `50` |
 | `BALANCE_BUFFER_PCT` | Margin buffer percentage (e.g., 95 uses 95% equity, 5% fee cushion) | `95` |
-| `TRADING_SYMBOL` | Target default symbol for local strategy runner | `ETHUSD.P` |
+| `TRADING_SYMBOL` | Target default symbol for local strategy runner | `BTCUSD.P` |
 
 ---
 

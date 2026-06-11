@@ -291,9 +291,9 @@ def run_strategy_for_account(app, account, client):
         qty_base = risk_dollars / sl_dist
         qty_lots = int(math.floor(qty_base / contract_val))
         
-        # Enforce maximum buying power based on leverage
+        # Enforce maximum buying power based on leverage and buffer
         lot_value_usd = last_close * contract_val
-        max_buying_power = balance * account.leverage * 0.90
+        max_buying_power = balance * account.leverage * (account.balance_buffer_pct / 100.0)
         max_qty_lots = int(math.floor(max_buying_power / lot_value_usd))
         qty_lots = min(qty_lots, max_qty_lots)
         
@@ -357,9 +357,9 @@ def run_strategy_for_account(app, account, client):
         qty_base = risk_dollars / sl_dist
         qty_lots = int(math.floor(qty_base / contract_val))
         
-        # Enforce maximum buying power based on leverage
+        # Enforce maximum buying power based on leverage and buffer
         lot_value_usd = last_close * contract_val
-        max_buying_power = balance * account.leverage * 0.90
+        max_buying_power = balance * account.leverage * (account.balance_buffer_pct / 100.0)
         max_qty_lots = int(math.floor(max_buying_power / lot_value_usd))
         qty_lots = min(qty_lots, max_qty_lots)
         

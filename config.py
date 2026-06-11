@@ -22,11 +22,11 @@ class Config:
     DEFAULT_LEVERAGE = int(os.getenv("DEFAULT_LEVERAGE", "50"))
     
     # Risk Management / Margin Buffer
-    # percentage of available balance to allocate per trade (e.g. 55 means 55%, leaving a 45% buffer for fees/slippage)
-    BALANCE_BUFFER_PCT = float(os.getenv("BALANCE_BUFFER_PCT", "55")) / 100.0
+    # percentage of available balance to allocate per trade (e.g. 95 means 95%, leaving a 5% buffer for fees/slippage)
+    BALANCE_BUFFER_PCT = float(os.getenv("BALANCE_BUFFER_PCT", "95")) / 100.0
 
-    # Trading Symbol / Asset Configuration (e.g. ETHUSD.P, BTCUSD.P, SOLUSD.P)
-    TRADING_SYMBOL = os.getenv("TRADING_SYMBOL", "ETHUSD.P")
+    # Trading Symbol / Asset Configuration (e.g. BTCUSD.P, SOLUSD.P)
+    TRADING_SYMBOL = os.getenv("TRADING_SYMBOL", "")
 
     @classmethod
     def validate(cls):

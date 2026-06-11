@@ -139,7 +139,7 @@ class TestStrategyRunner(unittest.TestCase):
                 return {
                     "success": True,
                     "result": [{
-                        "symbol": "ETHUSD",
+                        "symbol": "BTCUSD",
                         "id": 176,
                         "contract_value": "0.01",
                         "tick_size": "0.05"
@@ -264,7 +264,7 @@ class TestStrategyRunner(unittest.TestCase):
                 return {
                     "success": True,
                     "result": [{
-                        "symbol": "ETHUSD",
+                        "symbol": "BTCUSD",
                         "id": 176,
                         "contract_value": "0.01",
                         "tick_size": "0.05"

@@ -20,17 +20,17 @@ class TestDeltaBot(unittest.TestCase):
     def test_symbol_normalization(self):
         """Verify symbols are cleaned up correctly."""
         # Test clean symbol extraction
-        prod1 = {"symbol": "ETHUSD", "id": 27}
-        prod2 = {"symbol": "BTCUSD", "id": 1}
+        prod1 = {"symbol": "BTCUSD", "id": 27}
+        prod2 = {"symbol": "SOLUSD", "id": 1}
         self.client._products_cache = [prod1, prod2]
         self.client._products_cache_time = time.time()
         
-        self.assertEqual(self.client.get_product_by_symbol("ETHUSD.P")["id"], 27)
-        self.assertEqual(self.client.get_product_by_symbol("ethusd.p")["id"], 27)
-        self.assertEqual(self.client.get_product_by_symbol("ETH/USD")["id"], 27)
-        self.assertEqual(self.client.get_product_by_symbol("BTCUSD.PERP")["id"], 1)
-        self.assertEqual(self.client.get_product_by_symbol("DELTAIN:ETHUSD.P")["id"], 27)
-        self.assertEqual(self.client.get_product_by_symbol("DELTA:ETHUSD.P")["id"], 27)
+        self.assertEqual(self.client.get_product_by_symbol("BTCUSD.P")["id"], 27)
+        self.assertEqual(self.client.get_product_by_symbol("btcusd.p")["id"], 27)
+        self.assertEqual(self.client.get_product_by_symbol("BTC/USD")["id"], 27)
+        self.assertEqual(self.client.get_product_by_symbol("SOLUSD.PERP")["id"], 1)
+        self.assertEqual(self.client.get_product_by_symbol("DELTAIN:BTCUSD.P")["id"], 27)
+        self.assertEqual(self.client.get_product_by_symbol("DELTA:BTCUSD.P")["id"], 27)
 
     def test_signature_generation(self):
         """Verify headers and signature concatenation formatting."""
@@ -60,8 +60,8 @@ class TestDeltaBot(unittest.TestCase):
         balance = 11.0 # USD
         leverage = 50
         buffer = 0.90 # 90%
-        price = 1900.0 # ETH price
-        contract_value = 0.01 # 1 lot = 0.01 ETH
+        price = 1900.0 # BTC price
+        contract_value = 0.01 # 1 lot = 0.01 BTC
         
         # Sizing logic from app.py
         buying_power = balance * leverage * buffer
@@ -124,7 +124,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         # Mock the public symbol lookup to return consistent test values
         from app import public_delta_client
         public_delta_client.get_product_by_symbol = MagicMock(
-            return_value={"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+            return_value={"symbol": "BTCUSD", "id": 27, "contract_value": "0.01"}
         )
         
     def tearDown(self):
@@ -138,19 +138,19 @@ class TestWebhookEndpoints(unittest.TestCase):
     def test_webhook_unauthorized(self, mock_client_class):
         # Setup basic mock for symbol lookup (uses public_delta_client)
         mock_client = mock_client_class.return_value
-        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27}
+        mock_client.get_product_by_symbol.return_value = {"symbol": "BTCUSD", "id": 27}
 
         # Test missing passphrase
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P"
+            "ticker": "BTCUSD.P"
         })
         self.assertEqual(response.status_code, 401)
         
         # Test invalid passphrase
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "wrong_passphrase"
         })
         self.assertEqual(response.status_code, 401)
@@ -159,13 +159,13 @@ class TestWebhookEndpoints(unittest.TestCase):
     def test_webhook_close_guards(self, mock_client_class):
         # Setup mocks
         mock_client = mock_client_class.return_value
-        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27}
+        mock_client.get_product_by_symbol.return_value = {"symbol": "BTCUSD", "id": 27}
         
         # Scenario 1: Receive close_long but position is SHORT (should ignore)
         mock_client.get_position.return_value = {"product_id": 27, "size": "-10", "side": "sell"}
         response = self.app.post('/webhook', json={
             "action": "close_long",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         self.assertEqual(response.status_code, 200)
@@ -179,7 +179,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         mock_client.place_order.reset_mock()
         response = self.app.post('/webhook', json={
             "action": "close_short",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         self.assertEqual(response.status_code, 200)
@@ -194,7 +194,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         mock_client.place_order.return_value = {"success": True, "result": {"id": 12345}}
         response = self.app.post('/webhook', json={
             "action": "close_long",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         self.assertEqual(response.status_code, 200)
@@ -212,7 +212,7 @@ class TestWebhookEndpoints(unittest.TestCase):
     def test_webhook_reversal_buy(self, mock_client_class):
         # Setup mocks
         mock_client = mock_client_class.return_value
-        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+        mock_client.get_product_by_symbol.return_value = {"symbol": "BTCUSD", "id": 27, "contract_value": "0.01"}
         mock_client.get_position.return_value = {"product_id": 27, "size": "-10", "side": "sell"} # Currently SHORT
         mock_client.place_order.return_value = {"success": True, "result": {"id": 12345}}
         mock_client.get_ticker.return_value = {"mark_price": "2000"}
@@ -221,7 +221,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         # Send buy webhook (which triggers reversal of the short position)
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         
@@ -272,7 +272,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         mock_client = mock_client_class.return_value
         
         # Setup shared mocks
-        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+        mock_client.get_product_by_symbol.return_value = {"symbol": "BTCUSD", "id": 27, "contract_value": "0.01"}
         mock_client.get_position.return_value = None # No open positions (no reversal needed)
         mock_client.get_ticker.return_value = {"mark_price": "2000"}
         mock_client.get_available_balance.return_value = (10.0, "USD")
@@ -281,7 +281,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         # Trigger webhook
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         
@@ -320,7 +320,7 @@ class TestWebhookEndpoints(unittest.TestCase):
              patch('config.Config.API_SECRET', 'env_fallback_secret'):
             
             mock_client = mock_client_class.return_value
-            mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+            mock_client.get_product_by_symbol.return_value = {"symbol": "BTCUSD", "id": 27, "contract_value": "0.01"}
             mock_client.get_position.return_value = None
             mock_client.get_ticker.return_value = {"mark_price": "2000"}
             mock_client.get_available_balance.return_value = (10.0, "USD")
@@ -328,7 +328,7 @@ class TestWebhookEndpoints(unittest.TestCase):
             
             response = self.app.post('/webhook', json={
                 "action": "buy",
-                "ticker": "ETHUSD.P",
+                "ticker": "BTCUSD.P",
                 "passphrase": "test_passphrase"
             })
             
@@ -349,10 +349,10 @@ class TestWebhookEndpoints(unittest.TestCase):
         from app import parse_email_signal
         
         # Format 1: JSON body
-        body_json = 'Some text before\n{\n  "action": "buy",\n  "ticker": "ETHUSD.P",\n  "quantity": 0.25\n}\nSome text after'
+        body_json = 'Some text before\n{\n  "action": "buy",\n  "ticker": "BTCUSD.P",\n  "quantity": 0.25\n}\nSome text after'
         subject = "Alert triggered"
         ticker, action, quantity = parse_email_signal(body_json, subject)
-        self.assertEqual(ticker, "ETHUSD.P")
+        self.assertEqual(ticker, "BTCUSD.P")
         self.assertEqual(action, "buy")
         self.assertEqual(quantity, 0.25)
         
@@ -365,9 +365,9 @@ class TestWebhookEndpoints(unittest.TestCase):
         
         # Format 3: Subject line fallback
         body_empty = "This is a custom alert mail body."
-        subject_buy = "Buy ETHUSD.P Alert"
+        subject_buy = "Buy BTCUSD.P Alert"
         ticker, action, quantity = parse_email_signal(body_empty, subject_buy)
-        self.assertEqual(ticker, "ETHUSD.P")
+        self.assertEqual(ticker, "BTCUSD.P")
         self.assertEqual(action, "buy")
         self.assertIsNone(quantity)
 
@@ -378,7 +378,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         
         # Setup mock client
         mock_client = mock_client_class.return_value
-        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+        mock_client.get_product_by_symbol.return_value = {"symbol": "BTCUSD", "id": 27, "contract_value": "0.01"}
         mock_client.get_position.return_value = None
         mock_client.get_ticker.return_value = {"mark_price": "2000"}
         mock_client.get_available_balance.return_value = (10.0, "USD")
@@ -390,7 +390,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         # Trigger webhook
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         
@@ -398,7 +398,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         self.assertEqual(TradeLog.query.count(), initial_count + 1)
         
         latest_log = TradeLog.query.order_by(TradeLog.id.desc()).first()
-        self.assertEqual(latest_log.ticker, "ETHUSD.P")
+        self.assertEqual(latest_log.ticker, "BTCUSD.P")
         self.assertEqual(latest_log.action, "buy")
         self.assertEqual(latest_log.status, "success")
         self.assertIn("Test Account 1: Success", latest_log.details)
@@ -409,7 +409,7 @@ class TestWebhookEndpoints(unittest.TestCase):
         from app import check_position_matches_action
         
         mock_client = mock_client_class.return_value
-        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27}
+        mock_client.get_product_by_symbol.return_value = {"symbol": "BTCUSD", "id": 27}
         
         account_data = {
             "api_key": "key1",
@@ -418,15 +418,15 @@ class TestWebhookEndpoints(unittest.TestCase):
         
         # Scenario 1: Long position matches "buy" action
         mock_client.get_position.return_value = {"product_id": 27, "size": "10", "side": "buy"}
-        self.assertTrue(check_position_matches_action(account_data, "ETHUSD.P", "buy"))
+        self.assertTrue(check_position_matches_action(account_data, "BTCUSD.P", "buy"))
         
         # Scenario 2: Short position mismatches "buy" action
         mock_client.get_position.return_value = {"product_id": 27, "size": "-10", "side": "sell"}
-        self.assertFalse(check_position_matches_action(account_data, "ETHUSD.P", "buy"))
+        self.assertFalse(check_position_matches_action(account_data, "BTCUSD.P", "buy"))
         
         # Scenario 3: No position matches "close_long" action
         mock_client.get_position.return_value = None
-        self.assertTrue(check_position_matches_action(account_data, "ETHUSD.P", "close_long"))
+        self.assertTrue(check_position_matches_action(account_data, "BTCUSD.P", "close_long"))
 
 class TestPnLTracking(unittest.TestCase):
     def setUp(self):
@@ -531,7 +531,7 @@ class TestPnLTracking(unittest.TestCase):
             "result": [
                 {
                     "product_id": 27,
-                    "product": {"symbol": "ETHUSD", "contract_value": "0.01"},
+                    "product": {"symbol": "BTCUSD", "contract_value": "0.01"},
                     "size": 10.0,
                     "side": "sell",
                     "average_fill_price": "1840.0",
@@ -560,7 +560,7 @@ class TestPnLTracking(unittest.TestCase):
         """Test that the /api/pnl endpoint aggregates and normalizes positions."""
         # Mock public product list
         mock_public_client.get_products.return_value = [
-            {"id": 27, "symbol": "ETHUSD"}
+            {"id": 27, "symbol": "BTCUSD"}
         ]
         
         # Mock private client instance
@@ -604,7 +604,7 @@ class TestPnLTracking(unittest.TestCase):
         open_list = data["open"]
         self.assertEqual(len(open_list), 1)
         self.assertEqual(open_list[0]["account_name"], "PnL Test Account")
-        self.assertEqual(open_list[0]["symbol"], "ETHUSD")
+        self.assertEqual(open_list[0]["symbol"], "BTCUSD")
         self.assertEqual(open_list[0]["side"], "LONG")
         self.assertEqual(open_list[0]["size"], 10.0)
         self.assertEqual(open_list[0]["unrealized_pnl"], 10.0)
@@ -613,7 +613,7 @@ class TestPnLTracking(unittest.TestCase):
         closed_list = data["closed"]
         self.assertEqual(len(closed_list), 1)
         self.assertEqual(closed_list[0]["account_name"], "PnL Test Account")
-        self.assertEqual(closed_list[0]["symbol"], "ETHUSD")
+        self.assertEqual(closed_list[0]["symbol"], "BTCUSD")
         self.assertEqual(closed_list[0]["side"], "SHORT")
         self.assertEqual(closed_list[0]["closed_size"], 5.0)
         self.assertEqual(closed_list[0]["realized_pnl"], -50.0)
@@ -628,7 +628,7 @@ class TestPnLTracking(unittest.TestCase):
         """Test that the /api/journal/export endpoint generates a valid CSV file download."""
         # Mock public product list
         mock_public_client.get_products.return_value = [
-            {"id": 27, "symbol": "ETHUSD", "contract_value": "0.01"}
+            {"id": 27, "symbol": "BTCUSD", "contract_value": "0.01"}
         ]
         
         # Mock private client instance
@@ -669,7 +669,7 @@ class TestPnLTracking(unittest.TestCase):
         # Verify data row values
         row = lines[1].split(',')
         self.assertEqual(row[1], "PnL Test Account")
-        self.assertEqual(row[2], "ETHUSD")
+        self.assertEqual(row[2], "BTCUSD")
         self.assertEqual(row[3], "LONG")
         self.assertEqual(row[4], "10.0")
         self.assertEqual(row[7], "2.0000") # Gross PnL
@@ -708,7 +708,7 @@ class TestSizingModels(unittest.TestCase):
         # Mock public symbol lookup
         from app import public_delta_client
         public_delta_client.get_product_by_symbol = MagicMock(
-            return_value={"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+            return_value={"symbol": "BTCUSD", "id": 27, "contract_value": "0.01"}
         )
 
     def tearDown(self):
@@ -744,7 +744,7 @@ class TestSizingModels(unittest.TestCase):
         # 3. Post webhook
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         
@@ -789,7 +789,7 @@ class TestSizingModels(unittest.TestCase):
         # 3. Post webhook
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase"
         })
         
@@ -823,10 +823,10 @@ class TestSizingModels(unittest.TestCase):
         mock_client.place_order.return_value = {"success": True, "result": {"id": 222}}
         
         # 3. Post webhook with quantity parameter
-        # ETHUSD.P contract value is 0.01. So quantity of 0.25 ETH = 25 contracts/lots
+        # BTCUSD.P contract value is 0.01. So quantity of 0.25 BTC = 25 contracts/lots
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase",
             "quantity": 0.25
         })
@@ -865,11 +865,11 @@ class TestSizingModels(unittest.TestCase):
         mock_client.get_available_balance.return_value = (10.0, "USD") # Available balance is $10.00
         
         # 3. Post webhook requesting huge quantity
-        # 0.1 ETH @ $2000 = $200 position value.
+        # 0.1 BTC @ $2000 = $200 position value.
         # Leverage = 10x -> Required margin = $20.00, which exceeds balance of $10.00
         response = self.app.post('/webhook', json={
             "action": "buy",
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "passphrase": "test_passphrase",
             "quantity": 0.10
         })
@@ -1007,12 +1007,12 @@ class TestWebhookPlayground(unittest.TestCase):
         # Mock product resolution
         mock_public_client.get_product_by_symbol.return_value = {
             "id": 27,
-            "symbol": "ETHUSD",
+            "symbol": "BTCUSD",
             "contract_value": "0.01"
         }
         
         payload = {
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "action": "buy",
             "passphrase": "test_passphrase"
         }
@@ -1020,7 +1020,7 @@ class TestWebhookPlayground(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertTrue(data["simulation"])
-        self.assertEqual(data["ticker"], "ETHUSD.P")
+        self.assertEqual(data["ticker"], "BTCUSD.P")
         self.assertEqual(data["results"][0]["account"], "Playground Test Acc")
         self.assertTrue(data["results"][0]["success"])
         self.assertIn("Simulated successfully", data["results"][0]["message"])
@@ -1028,7 +1028,7 @@ class TestWebhookPlayground(unittest.TestCase):
     @patch('app.public_delta_client')
     def test_simulate_webhook_invalid_passphrase(self, mock_public_client):
         payload = {
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "action": "buy",
             "passphrase": "wrong_passphrase"
         }
@@ -1088,7 +1088,7 @@ class TestCircuitBreaker(unittest.TestCase):
         # Mock product resolution
         mock_public_client.get_product_by_symbol.return_value = {
             "id": 27,
-            "symbol": "ETHUSD",
+            "symbol": "BTCUSD",
             "contract_value": "0.01"
         }
         
@@ -1124,7 +1124,7 @@ class TestCircuitBreaker(unittest.TestCase):
         
         # Send a webhook to trigger execute_trades_background
         payload = {
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "action": "buy",
             "passphrase": "test_passphrase"
         }
@@ -1155,7 +1155,7 @@ class TestCircuitBreaker(unittest.TestCase):
         # Mock product resolution
         mock_public_client.get_product_by_symbol.return_value = {
             "id": 27,
-            "symbol": "ETHUSD",
+            "symbol": "BTCUSD",
             "contract_value": "0.01"
         }
         
@@ -1163,7 +1163,7 @@ class TestCircuitBreaker(unittest.TestCase):
         mock_private_client = mock_client_class.return_value
         
         payload = {
-            "ticker": "ETHUSD.P",
+            "ticker": "BTCUSD.P",
             "action": "buy",
             "passphrase": "test_passphrase"
         }
