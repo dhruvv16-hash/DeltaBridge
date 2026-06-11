@@ -16,6 +16,7 @@ class Account(db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     daily_loss_limit = db.Column(db.Float, nullable=True)
     is_circuit_broken = db.Column(db.Boolean, default=False, nullable=False)
+    local_strategy_enabled = db.Column(db.Boolean, default=False, nullable=False)
     
     def to_dict(self):
         return {
@@ -29,7 +30,8 @@ class Account(db.Model):
             "fixed_amount": self.fixed_amount,
             "is_active": self.is_active,
             "daily_loss_limit": self.daily_loss_limit,
-            "is_circuit_broken": self.is_circuit_broken
+            "is_circuit_broken": self.is_circuit_broken,
+            "local_strategy_enabled": self.local_strategy_enabled
         }
 
 class GlobalSetting(db.Model):
@@ -58,4 +60,38 @@ class TradeLog(db.Model):
             "source": self.source,
             "status": self.status,
             "details": self.details
+        }
+
+class StrategyState(db.Model):
+    __tablename__ = 'strategy_states'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    symbol = db.Column(db.String(50), nullable=False)
+    position_size = db.Column(db.Float, default=0.0, nullable=False) # 0 if flat, positive for long, negative for short
+    entry_price = db.Column(db.Float, nullable=True)
+    sl_dist = db.Column(db.Float, nullable=True)
+    tp1_price = db.Column(db.Float, nullable=True)
+    tp2_price = db.Column(db.Float, nullable=True)
+    tp1_hit = db.Column(db.Boolean, default=False, nullable=False)
+    tp2_hit = db.Column(db.Boolean, default=False, nullable=False)
+    current_sl = db.Column(db.Float, nullable=True)
+    last_signal_time = db.Column(db.Integer, nullable=True) # Unix timestamp of last processed closed candle
+    updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now(), nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "account_id": self.account_id,
+            "symbol": self.symbol,
+            "position_size": self.position_size,
+            "entry_price": self.entry_price,
+            "sl_dist": self.sl_dist,
+            "tp1_price": self.tp1_price,
+            "tp2_price": self.tp2_price,
+            "tp1_hit": self.tp1_hit,
+            "tp2_hit": self.tp2_hit,
+            "current_sl": self.current_sl,
+            "last_signal_time": self.last_signal_time,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

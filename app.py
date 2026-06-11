@@ -349,6 +349,20 @@ def init_email_listener():
     _email_thread_started = True
     logger.info("Spawned daemon thread for email polling.")
 
+_strategy_thread_started = False
+
+def init_strategy_runner():
+    global _strategy_thread_started
+    if _strategy_thread_started:
+        return
+        
+    import threading
+    from strategy_runner import strategy_runner_loop
+    thread = threading.Thread(target=strategy_runner_loop, args=(app,), daemon=True)
+    thread.start()
+    _strategy_thread_started = True
+    logger.info("Spawned daemon thread for local strategy runner.")
+
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint to keep the bot awake (e.g. via UptimeRobot)."""
@@ -1336,6 +1350,8 @@ def update_account(id):
                 pass
     if "is_circuit_broken" in data:
         acc.is_circuit_broken = bool(data["is_circuit_broken"])
+    if "local_strategy_enabled" in data:
+        acc.local_strategy_enabled = bool(data["local_strategy_enabled"])
         
     db.session.commit()
     return jsonify({"status": "success", "account": acc.to_dict()})
@@ -1347,6 +1363,22 @@ def reset_breaker(id):
     db.session.commit()
     logger.info(f"Circuit breaker reset successfully for account '{acc.name}' (ID: {acc.id}).")
     return jsonify({"status": "success", "message": f"Circuit breaker reset for account {acc.name}", "account": acc.to_dict()})
+
+@app.route("/api/accounts/<int:id>/toggle-strategy", methods=["POST"])
+def toggle_strategy(id):
+    acc = Account.query.get_or_404(id)
+    data = request.get_json(silent=True) or {}
+    if "enabled" in data:
+        acc.local_strategy_enabled = bool(data["enabled"])
+    else:
+        acc.local_strategy_enabled = not acc.local_strategy_enabled
+    db.session.commit()
+    logger.info(f"Local strategy enabled status set to {acc.local_strategy_enabled} for account '{acc.name}' (ID: {acc.id}).")
+    return jsonify({
+        "status": "success", 
+        "message": f"Local strategy {'enabled' if acc.local_strategy_enabled else 'disabled'} for account {acc.name}", 
+        "account": acc.to_dict()
+    })
 
 @app.route("/api/accounts/<int:id>", methods=["DELETE"])
 def delete_account(id):
@@ -1993,6 +2025,15 @@ def run_migrations():
         except Exception as e:
             db.session.rollback()
             logger.debug(f"is_circuit_broken migration status: {e}")
+            
+        # 5. Add local_strategy_enabled
+        try:
+            db.session.execute(text("ALTER TABLE accounts ADD COLUMN local_strategy_enabled BOOLEAN DEFAULT FALSE NOT NULL"))
+            db.session.commit()
+            logger.info("Database migration: added local_strategy_enabled column to accounts table.")
+        except Exception as e:
+            db.session.rollback()
+            logger.debug(f"local_strategy_enabled migration status: {e}")
     except Exception as e:
         logger.error(f"Migration failed: {e}")
 
@@ -2011,6 +2052,8 @@ if os.getenv("FLASK_ENV") != "testing":
             logger.info(f"Initialized default passphrase in database: {initial_passphrase}")
         # Spawn daemon thread for email polling
         init_email_listener()
+        # Spawn daemon thread for local strategy runner
+        init_strategy_runner()
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))

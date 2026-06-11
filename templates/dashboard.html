@@ -990,10 +990,20 @@
                             <button class="btn btn-secondary btn-sm" onclick="checkBalance(${acc.id})">Check Balance</button>
                             ${resetBreakerBtn}
                             <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct}, '${acc.sizing_type}', ${acc.fixed_amount}, ${acc.daily_loss_limit})">Edit</button>
-                            <label class="switch">
-                                <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
-                                <span class="slider"></span>
-                            </label>
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-right: 0.5rem; margin-left: 0.5rem;">
+                                <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Local Strategy</span>
+                                <label class="switch">
+                                    <input type="checkbox" ${acc.local_strategy_enabled ? 'checked' : ''} onchange="toggleStrategy(${acc.id}, this.checked)">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-right: 0.5rem;">
+                                <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Active</span>
+                                <label class="switch">
+                                    <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
                             <button class="btn btn-danger btn-sm" onclick="deleteAccount(${acc.id})">Delete</button>
                         </div>
                     `;
@@ -1181,6 +1191,25 @@
                     showToast(is_active ? "Account enabled" : "Account disabled");
                 } else {
                     showToast("Failed to update status", false);
+                }
+            } catch (err) {
+                showToast("Server error occurred", false);
+            }
+        }
+
+        // Toggle local strategy status
+        async function toggleStrategy(id, enabled) {
+            try {
+                const response = await fetch(`/api/accounts/${id}/toggle-strategy`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                
+                if (response.ok) {
+                    showToast(enabled ? "Local Strategy enabled" : "Local Strategy disabled");
+                } else {
+                    showToast("Failed to update strategy status", false);
                 }
             } catch (err) {
                 showToast("Server error occurred", false);
