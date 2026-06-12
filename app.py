@@ -56,6 +56,12 @@ def initialize_db_connections():
                 db.engine.dispose()
         except Exception as e:
             logger.warning(f"Error disposing database engine pool on first request: {e}")
+            
+        # Spawn daemon threads after disposing the engine pool on first request
+        if os.getenv("FLASK_ENV") != "testing":
+            init_email_listener()
+            init_strategy_runner()
+            
         _db_pool_initialized = True
 
 
@@ -2707,10 +2713,6 @@ if os.getenv("FLASK_ENV") != "testing":
             db.session.add(GlobalSetting(key="passphrase", value=initial_passphrase))
             db.session.commit()
             logger.info(f"Initialized default passphrase in database: {initial_passphrase}")
-        # Spawn daemon thread for email polling
-        init_email_listener()
-        # Spawn daemon thread for local strategy runner
-        init_strategy_runner()
         
         # Dispose the engine pool so that Gunicorn workers do not inherit open connection sockets
         try:
