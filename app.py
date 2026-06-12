@@ -79,15 +79,19 @@ def send_notification(title, message, status_color=3447003):
         return {"telegram": {"success": True}, "discord": {"success": True}}
     results = {"telegram": {"success": True}, "discord": {"success": True}}
     try:
-        telegram_enabled = GlobalSetting.query.filter_by(key="telegram_enabled").first()
-        telegram_token = GlobalSetting.query.filter_by(key="telegram_token").first()
-        telegram_chat_id = GlobalSetting.query.filter_by(key="telegram_chat_id").first()
+        keys = ["telegram_enabled", "telegram_token", "telegram_chat_id", "discord_enabled", "discord_webhook_url"]
+        settings = GlobalSetting.query.filter(GlobalSetting.key.in_(keys)).all()
+        s_dict = {s.key: s.value for s in settings}
         
-        discord_enabled = GlobalSetting.query.filter_by(key="discord_enabled").first()
-        discord_webhook_url = GlobalSetting.query.filter_by(key="discord_webhook_url").first()
+        telegram_enabled = s_dict.get("telegram_enabled")
+        telegram_token = s_dict.get("telegram_token")
+        telegram_chat_id = s_dict.get("telegram_chat_id")
+        
+        discord_enabled = s_dict.get("discord_enabled")
+        discord_webhook_url = s_dict.get("discord_webhook_url")
 
         # Discord Embed
-        if discord_enabled and discord_enabled.value.lower() == "true" and discord_webhook_url and discord_webhook_url.value:
+        if discord_enabled and discord_enabled.lower() == "true" and discord_webhook_url:
             payload = {
                 "embeds": [{
                     "title": title,
@@ -97,7 +101,7 @@ def send_notification(title, message, status_color=3447003):
                 }]
             }
             try:
-                res = requests.post(discord_webhook_url.value, json=payload, timeout=5)
+                res = requests.post(discord_webhook_url, json=payload, timeout=5)
                 if res.status_code >= 400:
                     logger.error(f"Discord notification HTTP error: {res.status_code} - {res.text}")
                     results["discord"] = {"success": False, "error": f"HTTP {res.status_code}: {res.text}"}
@@ -108,10 +112,10 @@ def send_notification(title, message, status_color=3447003):
                 results["discord"] = {"success": False, "error": str(e)}
 
         # Telegram Message
-        if telegram_enabled and telegram_enabled.value.lower() == "true" and telegram_token and telegram_token.value and telegram_chat_id and telegram_chat_id.value:
-            url = f"https://api.telegram.org/bot{telegram_token.value}/sendMessage"
+        if telegram_enabled and telegram_enabled.lower() == "true" and telegram_token and telegram_chat_id:
+            url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
             payload = {
-                "chat_id": telegram_chat_id.value,
+                "chat_id": telegram_chat_id,
                 "text": f"<b>{title}</b>\n\n{message}",
                 "parse_mode": "HTML"
             }
@@ -143,22 +147,26 @@ def send_email_alert(subject, html_body):
         return True
 
     try:
-        enabled = GlobalSetting.query.filter_by(key="email_enabled").first()
-        if not enabled or enabled.value.lower() != "true":
+        keys = ["email_enabled", "email_address", "email_password", "imap_host"]
+        settings = GlobalSetting.query.filter(GlobalSetting.key.in_(keys)).all()
+        s_dict = {s.key: s.value for s in settings}
+
+        enabled = s_dict.get("email_enabled")
+        if not enabled or enabled.lower() != "true":
             logger.info("Email alerts not enabled globally.")
             return False
 
-        email_address_s = GlobalSetting.query.filter_by(key="email_address").first()
-        email_password_s = GlobalSetting.query.filter_by(key="email_password").first()
-        imap_host_s = GlobalSetting.query.filter_by(key="imap_host").first()
+        email_address_s_val = s_dict.get("email_address")
+        email_password_s_val = s_dict.get("email_password")
+        imap_host_s_val = s_dict.get("imap_host")
 
-        if not email_address_s or not email_address_s.value or not email_password_s or not email_password_s.value:
+        if not email_address_s_val or not email_password_s_val:
             logger.warning("Email address or password not configured. Cannot send email alert.")
             return False
 
-        email_address = email_address_s.value
-        email_password = email_password_s.value
-        imap_host = imap_host_s.value if imap_host_s else "imap.gmail.com"
+        email_address = email_address_s_val
+        email_password = email_password_s_val
+        imap_host = imap_host_s_val if imap_host_s_val else "imap.gmail.com"
 
         # Determine SMTP Host
         smtp_host = "smtp.gmail.com"
@@ -374,24 +382,28 @@ def email_polling_loop():
             
             # 1. Fetch settings inside a short-lived DB context and release connection immediately
             with app.app_context():
-                enabled_setting = GlobalSetting.query.filter_by(key="email_enabled").first()
-                if enabled_setting and enabled_setting.value == "true":
+                keys = ["email_enabled", "imap_host", "imap_port", "email_address", "email_password", "email_sender", "email_subject"]
+                settings = GlobalSetting.query.filter(GlobalSetting.key.in_(keys)).all()
+                s_dict = {s.key: s.value for s in settings}
+                
+                enabled_setting = s_dict.get("email_enabled")
+                if enabled_setting == "true":
                     enabled = True
-                    imap_host_s = GlobalSetting.query.filter_by(key="imap_host").first()
-                    imap_port_s = GlobalSetting.query.filter_by(key="imap_port").first()
-                    email_address_s = GlobalSetting.query.filter_by(key="email_address").first()
-                    email_password_s = GlobalSetting.query.filter_by(key="email_password").first()
-                    email_sender_s = GlobalSetting.query.filter_by(key="email_sender").first()
-                    email_subject_s = GlobalSetting.query.filter_by(key="email_subject").first()
+                    imap_host = s_dict.get("imap_host", "")
                     
-                    imap_host = imap_host_s.value if imap_host_s else ""
-                    imap_port = int(imap_port_s.value) if imap_port_s else 993
-                    email_address = email_address_s.value if email_address_s else ""
-                    email_password = email_password_s.value if email_password_s else ""
-                    if email_sender_s:
-                        email_sender = email_sender_s.value
-                    if email_subject_s:
-                        email_subject = email_subject_s.value
+                    imap_port_val = s_dict.get("imap_port")
+                    if imap_port_val:
+                        try:
+                            imap_port = int(imap_port_val)
+                        except ValueError:
+                            imap_port = 993
+                    else:
+                        imap_port = 993
+                        
+                    email_address = s_dict.get("email_address", "")
+                    email_password = s_dict.get("email_password", "")
+                    email_sender = s_dict.get("email_sender", "noreply@tradingview.com")
+                    email_subject = s_dict.get("email_subject", "TradingView Alert")
                         
                     active_accounts = Account.query.filter_by(is_active=True).all()
                     for account in active_accounts:
@@ -550,17 +562,25 @@ def dashboard():
     """Serves the bot configuration panel dashboard."""
     return render_template("dashboard.html")
 
+@app.route("/api/ping", methods=["GET"])
+def api_ping():
+    return jsonify({"status": "pong"})
+
 # ----------------- ADMIN SETTINGS ENDPOINTS -----------------
 
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
-    passphrase_setting = GlobalSetting.query.filter_by(key="passphrase").first()
-    telegram_enabled = GlobalSetting.query.filter_by(key="telegram_enabled").first()
-    telegram_token = GlobalSetting.query.filter_by(key="telegram_token").first()
-    telegram_chat_id = GlobalSetting.query.filter_by(key="telegram_chat_id").first()
-    discord_enabled = GlobalSetting.query.filter_by(key="discord_enabled").first()
-    discord_webhook_url = GlobalSetting.query.filter_by(key="discord_webhook_url").first()
-    local_bot_dry_run = GlobalSetting.query.filter_by(key="local_bot_dry_run").first()
+    keys = ["passphrase", "telegram_enabled", "telegram_token", "telegram_chat_id", "discord_enabled", "discord_webhook_url", "local_bot_dry_run"]
+    settings = GlobalSetting.query.filter(GlobalSetting.key.in_(keys)).all()
+    s_dict = {s.key: s.value for s in settings}
+    
+    passphrase_val = s_dict.get("passphrase", Config.PASSPHRASE)
+    telegram_enabled_val = s_dict.get("telegram_enabled", "false")
+    telegram_token_val = s_dict.get("telegram_token", "")
+    telegram_chat_id_val = s_dict.get("telegram_chat_id", "")
+    discord_enabled_val = s_dict.get("discord_enabled", "false")
+    discord_webhook_url_val = s_dict.get("discord_webhook_url", "")
+    local_bot_dry_run_val = s_dict.get("local_bot_dry_run", "true")
     
     base_url = Config.BASE_URL.lower()
     if "testnet" in base_url:
@@ -571,13 +591,13 @@ def get_settings():
         ws_url = "wss://api.delta.exchange/v2/websocket"
         
     return jsonify({
-        "passphrase": passphrase_setting.value if passphrase_setting else Config.PASSPHRASE,
-        "telegram_enabled": telegram_enabled.value if telegram_enabled else "false",
-        "telegram_token": telegram_token.value if telegram_token else "",
-        "telegram_chat_id": telegram_chat_id.value if telegram_chat_id else "",
-        "discord_enabled": discord_enabled.value if discord_enabled else "false",
-        "discord_webhook_url": discord_webhook_url.value if discord_webhook_url else "",
-        "local_bot_dry_run": (local_bot_dry_run.value == "true") if local_bot_dry_run else True,
+        "passphrase": passphrase_val,
+        "telegram_enabled": telegram_enabled_val,
+        "telegram_token": telegram_token_val,
+        "telegram_chat_id": telegram_chat_id_val,
+        "discord_enabled": discord_enabled_val,
+        "discord_webhook_url": discord_webhook_url_val,
+        "local_bot_dry_run": (local_bot_dry_run_val == "true"),
         "ws_url": ws_url
     })
 
