@@ -1023,6 +1023,7 @@ def get_pnl():
                     net_pnl = float(rpnl) - fees
 
                     closed_positions.append({
+                        "account_id": account.id,
                         "account_name": account.name,
                         "product_id": product_id,
                         "symbol": symbol,
@@ -1239,14 +1240,14 @@ def export_journal():
 
         # Define Styles
         font_header = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
-        fill_header = PatternFill(fill_type="solid", fgColor="1A1A2E")
+        fill_header = PatternFill(fill_type="solid", fgColor="FF1A1A2E")
         align_center = Alignment(horizontal="center", vertical="center")
         align_header = Alignment(horizontal="center", vertical="center", wrap_text=True)
         
-        border_thin_side = Side(style="thin", color="CCCCCC")
+        border_thin_side = Side(style="thin", color="FFCCCCCC")
         border_thin = Border(left=border_thin_side, right=border_thin_side, top=border_thin_side, bottom=border_thin_side)
         
-        border_medium_side = Side(style="medium", color="000000")
+        border_medium_side = Side(style="medium", color="FF000000")
         border_medium = Border(left=border_medium_side, right=border_medium_side, top=border_medium_side, bottom=border_medium_side)
 
         # Set header row height to 32.0 to ensure text wraps fully and is readable
@@ -1268,7 +1269,7 @@ def export_journal():
 
         for row_idx, pos in enumerate(closed_positions, start=2):
             is_win = pos["net_pnl"] >= 0
-            fill_color = "E8F5E9" if is_win else "FFEBEE"
+            fill_color = "FFE8F5E9" if is_win else "FFFFEBEE"
             text_color = "FF1B7E1B" if is_win else "FFC62828"
             
             fill_row = PatternFill(fill_type="solid", fgColor=fill_color)
@@ -1304,19 +1305,20 @@ def export_journal():
         last_row = max(len(closed_positions) + 1, 2)
         total_row = last_row + 1
         
-        ws.cell(row=total_row, column=1, value="TOTAL")
-        ws.cell(row=total_row, column=8, value=f"=SUM(H2:H{last_row})")
-        ws.cell(row=total_row, column=9, value=f"=SUM(I2:I{last_row})")
-        ws.cell(row=total_row, column=10, value=f"=SUM(J2:J{last_row})")
-        
-        # Calculate sum dynamically to determine coloring
+        # Calculate sum dynamically to determine coloring and write values directly
         total_gross = sum(p["realized_pnl"] for p in closed_positions) if closed_positions else 0.0
+        total_fees = sum(p["fees"] for p in closed_positions) if closed_positions else 0.0
         total_net = sum(p["net_pnl"] for p in closed_positions) if closed_positions else 0.0
+        
+        ws.cell(row=total_row, column=1, value="TOTAL")
+        ws.cell(row=total_row, column=8, value=total_gross)
+        ws.cell(row=total_row, column=9, value=total_fees)
+        ws.cell(row=total_row, column=10, value=total_net)
         
         color_gross = "FF1B7E1B" if total_gross >= 0 else "FFC62828"
         color_net = "FF1B7E1B" if total_net >= 0 else "FFC62828"
         
-        fill_total = PatternFill(fill_type="solid", fgColor="E8EAF6")
+        fill_total = PatternFill(fill_type="solid", fgColor="FFE8EAF6")
         font_total_lbl = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
         font_total_val = Font(name="Calibri", size=11, bold=False)
         font_total_gross = Font(name="Arial", size=10, bold=True, color=color_gross)
@@ -2099,11 +2101,40 @@ def webhook():
             db.session.commit()
             return jsonify({"status": "error", "message": "Invalid 'action'. Must be buy, sell, close_long, or close_short"}), 400
 
-        # 3. Fetch all active accounts from the database
-        active_accounts = Account.query.filter_by(is_active=True).all()
+        # 3. Fetch active accounts (optionally filtered by target account in payload/query)
+        target_account_name = request.args.get("account") or request.args.get("account_name") or payload.get("account") or payload.get("account_name")
+        target_account_id = request.args.get("account_id") or payload.get("account_id")
+        
+        if target_account_id is not None:
+            try:
+                acc_id = int(target_account_id)
+                if acc_id == 0:
+                    active_accounts = []
+                else:
+                    active_accounts = Account.query.filter_by(id=acc_id, is_active=True).all()
+            except ValueError:
+                active_accounts = []
+        elif target_account_name:
+            active_accounts = Account.query.filter(
+                Account.name.ilike(target_account_name),
+                Account.is_active == True
+            ).all()
+        else:
+            active_accounts = Account.query.filter_by(is_active=True).all()
+
         if not active_accounts:
-            # Check if environment-based API keys are configured as fallback
-            if Config.API_KEY and Config.API_SECRET:
+            should_fallback = False
+            if target_account_id is not None:
+                try:
+                    should_fallback = (int(target_account_id) == 0)
+                except ValueError:
+                    pass
+            elif target_account_name:
+                should_fallback = (target_account_name.lower() in ["environment default", "environment_default", "default"])
+            else:
+                should_fallback = True
+
+            if should_fallback and Config.API_KEY and Config.API_SECRET:
                 logger.info("No active accounts configured in database. Falling back to environment API credentials.")
                 fallback_account = Account(
                     id=0,
@@ -2118,17 +2149,18 @@ def webhook():
                 )
                 active_accounts = [fallback_account]
             else:
-                logger.warning("No active accounts configured in database and no environment fallback API keys found. Skipping webhook execution.")
+                filter_desc = f" (Filter: Name={target_account_name}, ID={target_account_id})" if (target_account_name or target_account_id) else ""
+                logger.warning(f"No active accounts found in database matching criteria{filter_desc}. Skipping webhook execution.")
                 log_entry = TradeLog(
                     ticker=ticker,
                     action=action,
                     source="webhook",
                     status="ignored",
-                    details="No active accounts configured in database and no environment fallback API keys found."
+                    details=f"No active accounts found matching criteria{filter_desc}."
                 )
                 db.session.add(log_entry)
                 db.session.commit()
-                return jsonify({"status": "success", "message": "No active accounts configured"}), 200
+                return jsonify({"status": "success", "message": f"No active accounts matched{filter_desc}"}), 200
 
         # 4. Extract account data into plain dictionaries to pass to background thread
         accounts_data = []

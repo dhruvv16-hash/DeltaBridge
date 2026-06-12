@@ -310,6 +310,55 @@ class TestWebhookEndpoints(unittest.TestCase):
         self.assertIn(5, sizes)
 
     @patch('app.DeltaClient')
+    def test_webhook_targeted_account_execution(self, mock_client_class):
+        """Test that passing account or account_id targets a specific account only."""
+        # Add another active account
+        acc2 = self.Account(
+            name="Test Account 2",
+            api_key="key2",
+            api_secret="secret2",
+            leverage=20,
+            balance_buffer_pct=50.0,
+            is_active=True
+        )
+        self.db.session.add(acc2)
+        self.db.session.commit()
+        
+        mock_client = mock_client_class.return_value
+        mock_client.get_product_by_symbol.return_value = {"symbol": "ETHUSD", "id": 27, "contract_value": "0.01"}
+        mock_client.get_position.return_value = None
+        mock_client.get_ticker.return_value = {"mark_price": "2000"}
+        mock_client.get_available_balance.return_value = (10.0, "USD")
+        mock_client.place_order.return_value = {"success": True, "result": {"id": 999}}
+        
+        # Test 1: Target "Test Account 2" in JSON payload
+        mock_client.place_order.reset_mock()
+        response = self.app.post('/webhook', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase",
+            "account": "Test Account 2"
+        })
+        self.assertEqual(response.status_code, 200)
+        results = response.get_json()["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["name"], "Test Account 2")
+        self.assertEqual(mock_client.place_order.call_count, 1)
+        
+        # Test 2: Target ID 1 ("Test Account 1") in query parameters
+        mock_client.place_order.reset_mock()
+        response = self.app.post('/webhook?account_id=1', json={
+            "action": "buy",
+            "ticker": "ETHUSD.P",
+            "passphrase": "test_passphrase"
+        })
+        self.assertEqual(response.status_code, 200)
+        results = response.get_json()["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["name"], "Test Account 1")
+        self.assertEqual(mock_client.place_order.call_count, 1)
+
+    @patch('app.DeltaClient')
     def test_webhook_fallback_when_db_empty(self, mock_client_class):
         # 1. Delete the default account from DB
         self.db.session.delete(self.default_account)
@@ -683,9 +732,9 @@ class TestPnLTracking(unittest.TestCase):
         
         # Verify Total row
         self.assertEqual(ws.cell(row=3, column=1).value, "TOTAL")
-        self.assertEqual(ws.cell(row=3, column=8).value, "=SUM(H2:H2)")
-        self.assertEqual(ws.cell(row=3, column=9).value, "=SUM(I2:I2)")
-        self.assertEqual(ws.cell(row=3, column=10).value, "=SUM(J2:J2)")
+        self.assertEqual(ws.cell(row=3, column=8).value, 2.0)
+        self.assertAlmostEqual(ws.cell(row=3, column=9).value, 0.2010)
+        self.assertAlmostEqual(ws.cell(row=3, column=10).value, 1.7990)
 
     @patch('app.DeltaClient')
     @patch('app.public_delta_client')

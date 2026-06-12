@@ -859,9 +859,14 @@
 
             <!-- Closed Position History Card -->
             <div class="card">
-                <div class="card-title">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                     <span>Closed Position History</span>
-                    <button class="btn btn-secondary btn-sm" onclick="exportJournal()">Export Trade Journal (Excel)</button>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <select id="closed-positions-account-filter" class="form-control" style="background-color: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.25rem 0.5rem; font-size: 0.85rem;" onchange="filterClosedPositions()">
+                            <option value="all">All Accounts</option>
+                        </select>
+                        <button id="export-journal-btn" class="btn btn-secondary btn-sm" onclick="triggerFilteredExport()">Export Trade Journal (Excel)</button>
+                    </div>
                 </div>
                 <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
@@ -1017,10 +1022,46 @@
                     `;
                     listContainer.appendChild(row);
                 });
+                updateAccountFilterDropdown(accounts);
             } catch (err) {
                 console.error("Failed to load accounts:", err);
                 showToast("Failed to load configured accounts", false);
             }
+        }
+
+        // Helper to update the Closed Position History account filter dropdown options dynamically
+        function updateAccountFilterDropdown(accounts) {
+            const dropdown = document.getElementById('closed-positions-account-filter');
+            if (!dropdown) return;
+            
+            const currentSelection = dropdown.value;
+            dropdown.innerHTML = '<option value="all">All Accounts</option>';
+            
+            accounts.forEach(acc => {
+                const opt = document.createElement('option');
+                opt.value = acc.id;
+                opt.textContent = acc.name;
+                dropdown.appendChild(opt);
+            });
+            
+            if ([...dropdown.options].some(opt => opt.value === currentSelection)) {
+                dropdown.value = currentSelection;
+            } else {
+                dropdown.value = 'all';
+            }
+        }
+
+        // Triggered when the account filter select element changes
+        function filterClosedPositions() {
+            window.closedPositionsCurrentPage = 1;
+            renderClosedPositionsTable();
+        }
+
+        // Triggered by the main export button on the Closed Position History card
+        function triggerFilteredExport() {
+            const filterEl = document.getElementById('closed-positions-account-filter');
+            const selectedAccountId = filterEl ? filterEl.value : 'all';
+            exportJournal(selectedAccountId);
         }
 
         // Fetch global settings (passphrase and notifications)
@@ -1540,7 +1581,16 @@
             const controlsContainer = document.getElementById('closed-positions-controls');
             const paginationContainer = document.getElementById('closed-positions-pagination');
             
-            if (!window.closedPositionsCache || window.closedPositionsCache.length === 0) {
+            const filterEl = document.getElementById('closed-positions-account-filter');
+            const filterValue = filterEl ? filterEl.value : 'all';
+            
+            let filteredCache = window.closedPositionsCache || [];
+            if (filterValue !== 'all') {
+                const targetId = parseInt(filterValue);
+                filteredCache = filteredCache.filter(pos => pos.account_id === targetId);
+            }
+            
+            if (filteredCache.length === 0) {
                 closedContainer.innerHTML = `
                     <tr>
                         <td colspan="10" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
@@ -1553,7 +1603,7 @@
             }
 
             // Only show controls if there are more than 5 trades
-            if (window.closedPositionsCache.length <= 5) {
+            if (filteredCache.length <= 5) {
                 controlsContainer.style.display = 'none';
             } else {
                 controlsContainer.style.display = 'flex';
@@ -1563,20 +1613,24 @@
 
             let displayPositions = [];
             if (!window.isClosedPositionsExpanded) {
-                displayPositions = window.closedPositionsCache.slice(0, 5);
-                document.getElementById('expand-text').innerText = `Show All History (${window.closedPositionsCache.length} trades)`;
+                displayPositions = filteredCache.slice(0, 5);
+                document.getElementById('expand-text').innerText = `Show All History (${filteredCache.length} trades)`;
                 document.getElementById('expand-arrow').innerText = '▼';
                 paginationContainer.style.display = 'none';
                 controlsContainer.style.justifyContent = 'center';
             } else {
+                const totalPages = Math.ceil(filteredCache.length / closedPositionsPageSize);
+                if (window.closedPositionsCurrentPage > totalPages) {
+                    window.closedPositionsCurrentPage = Math.max(totalPages, 1);
+                }
                 const startIdx = (window.closedPositionsCurrentPage - 1) * closedPositionsPageSize;
                 const endIdx = startIdx + closedPositionsPageSize;
-                displayPositions = window.closedPositionsCache.slice(startIdx, endIdx);
+                displayPositions = filteredCache.slice(startIdx, endIdx);
                 document.getElementById('expand-text').innerText = 'Collapse';
                 document.getElementById('expand-arrow').innerText = '▲';
                 controlsContainer.style.justifyContent = 'space-between';
                 
-                renderClosedPositionsPagination();
+                renderClosedPositionsPagination(filteredCache);
             }
 
             displayPositions.forEach(pos => {
@@ -1622,7 +1676,7 @@
             let totalFees = 0;
             let totalNet = 0;
             
-            window.closedPositionsCache.forEach(pos => {
+            filteredCache.forEach(pos => {
                 totalSize += parseFloat(pos.closed_size || 0);
                 totalGross += parseFloat(pos.realized_pnl || 0);
                 totalFees += parseFloat(pos.fees || 0);
@@ -1666,12 +1720,12 @@
             renderClosedPositionsTable();
         }
 
-        function renderClosedPositionsPagination() {
+        function renderClosedPositionsPagination(cache = window.closedPositionsCache) {
             const paginationContainer = document.getElementById('closed-positions-pagination');
             paginationContainer.style.display = 'flex';
             paginationContainer.innerHTML = '';
 
-            const totalPages = Math.ceil(window.closedPositionsCache.length / closedPositionsPageSize);
+            const totalPages = Math.ceil(cache.length / closedPositionsPageSize);
             if (totalPages <= 1) {
                 paginationContainer.style.display = 'none';
                 return;
