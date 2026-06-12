@@ -1005,38 +1005,52 @@
                     }
                     
                     row.innerHTML = `
-                        <div class="account-info">
-                            <div class="account-name" style="display: flex; align-items: center; gap: 0.5rem;">${acc.name}${breakerBadge}</div>
-                            <div class="account-details">
-                                <span>API Key: <b>${apiKeyDisplay}</b></span>
-                                <span>Leverage: <b>${acc.leverage}x</b></span>
-                                <span>Trade Size: <b>${sizingValue} (${sizingLabel})</b></span>
-                                <span>Loss Limit: <b>${lossLimitText}</b></span>
+                        <div class="account-row-left" style="display: flex; flex-direction: column; gap: 1rem; flex: 1; min-width: 320px;">
+                            <div class="account-name" style="display: flex; align-items: center; gap: 0.5rem;">
+                                ${acc.name}${breakerBadge}
+                            </div>
+                            <div class="account-actions" style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-left: 0;">
+                                <span class="balance-badge" id="balance-${acc.id}">Balance: --</span>
+                                <button class="btn btn-secondary btn-sm" onclick="checkBalance(${acc.id})">Check Balance</button>
+                                ${resetBreakerBtn}
+                                <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct}, '${acc.sizing_type}', ${acc.fixed_amount}, ${acc.daily_loss_limit})">Edit</button>
+                                <button class="btn btn-secondary btn-sm" onclick="exportJournal(${acc.id})" style="background-color: rgba(16, 185, 129, 0.15); border-color: var(--success); color: var(--success);">Export Journal</button>
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-left: 0.25rem; margin-right: 0.25rem;">
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Local Strategy</span>
+                                    <label class="switch">
+                                        <input type="checkbox" ${acc.local_strategy_enabled ? 'checked' : ''} onchange="toggleStrategy(${acc.id}, this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-right: 0.25rem;">
+                                    <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Active</span>
+                                    <label class="switch">
+                                        <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <button class="btn btn-danger btn-sm" onclick="deleteAccount(${acc.id})">Delete</button>
                             </div>
                         </div>
-                        <div class="account-actions">
-                            <span class="balance-badge" id="balance-${acc.id}">Balance: --</span>
-                            <button class="btn btn-secondary btn-sm" onclick="checkBalance(${acc.id})">Check Balance</button>
-                            ${resetBreakerBtn}
-                            <button class="btn btn-secondary btn-sm" onclick="editAccount(${acc.id}, '${acc.name}', ${acc.leverage}, ${acc.balance_buffer_pct}, '${acc.sizing_type}', ${acc.fixed_amount}, ${acc.daily_loss_limit})">Edit</button>
-                            <button class="btn btn-secondary btn-sm" onclick="exportJournal(${acc.id})" style="background-color: rgba(16, 185, 129, 0.15); border-color: var(--success); color: var(--success);">Export Journal</button>
-                            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-right: 0.5rem; margin-left: 0.5rem;">
-                                <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Local Strategy</span>
-                                <label class="switch">
-                                    <input type="checkbox" ${acc.local_strategy_enabled ? 'checked' : ''} onchange="toggleStrategy(${acc.id}, this.checked)">
-                                    <span class="slider"></span>
-                                </label>
+                        
+                        <div class="account-row-right" style="flex: 0 0 auto; display: grid; grid-template-columns: repeat(2, minmax(170px, 1fr)); gap: 0.75rem; min-width: 360px;">
+                            <div class="info-block" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); padding: 0.5rem 0.75rem; border-radius: 8px;">
+                                <span style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 0.15rem;">API Key</span>
+                                <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); font-family: monospace;">${apiKeyDisplay}</span>
                             </div>
-                            <div style="display: flex; flex-direction: column; align-items: center; gap: 0.15rem; margin-right: 0.5rem;">
-                                <span style="font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Active</span>
-                                <label class="switch">
-                                    <input type="checkbox" ${acc.is_active ? 'checked' : ''} onchange="toggleAccount(${acc.id}, this.checked)">
-                                    <span class="slider"></span>
-                                </label>
+                            <div class="info-block" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); padding: 0.5rem 0.75rem; border-radius: 8px;">
+                                <span style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 0.15rem;">Leverage</span>
+                                <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">${acc.leverage}x</span>
                             </div>
-                            <button class="btn btn-danger btn-sm" onclick="deleteAccount(${acc.id})">Delete</button>
+                            <div class="info-block" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); padding: 0.5rem 0.75rem; border-radius: 8px;">
+                                <span style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 0.15rem;">Trade Size</span>
+                                <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">${sizingValue} <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-secondary);">(${sizingLabel})</span></span>
+                            </div>
+                            <div class="info-block" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); padding: 0.5rem 0.75rem; border-radius: 8px;">
+                                <span style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; display: block; margin-bottom: 0.15rem;">Loss Limit</span>
+                                <span style="font-size: 0.85rem; font-weight: 600; color: ${acc.daily_loss_limit ? 'var(--danger)' : 'var(--text-primary)'};">${lossLimitText}</span>
+                            </div>
                         </div>
-                    `;
                     
                     wrapper.appendChild(row);
 
