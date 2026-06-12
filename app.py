@@ -1213,12 +1213,16 @@ def export_journal():
         font_header = Font(name="Arial", size=10, bold=True, color="FFFFFF")
         fill_header = PatternFill(fill_type="solid", fgColor="1A1A2E")
         align_center = Alignment(horizontal="center", vertical="center")
+        align_header = Alignment(horizontal="center", vertical="center", wrap_text=True)
         
         border_thin_side = Side(style="thin", color="CCCCCC")
         border_thin = Border(left=border_thin_side, right=border_thin_side, top=border_thin_side, bottom=border_thin_side)
         
         border_medium_side = Side(style="medium", color="000000")
         border_medium = Border(left=border_medium_side, right=border_medium_side, top=border_medium_side, bottom=border_medium_side)
+
+        # Set header row height to 32.0 to ensure text wraps fully and is readable
+        ws.row_dimensions[1].height = 32.0
 
         # Headers
         headers = [
@@ -1231,7 +1235,7 @@ def export_journal():
             cell = ws.cell(row=1, column=col_idx)
             cell.font = font_header
             cell.fill = fill_header
-            cell.alignment = align_center
+            cell.alignment = align_header
             cell.border = border_medium
 
         for row_idx, pos in enumerate(closed_positions, start=2):
@@ -1268,7 +1272,8 @@ def export_journal():
                     cell.font = font_normal
 
         # Total Row
-        last_row = len(closed_positions) + 1
+        # Guard last_row to be at least 2 (if there are no trades) to avoid backward ranges like H2:H1
+        last_row = max(len(closed_positions) + 1, 2)
         total_row = last_row + 1
         
         ws.cell(row=total_row, column=1, value="TOTAL")
@@ -1312,6 +1317,10 @@ def export_journal():
                 else:
                     cell.font = font_total_val
                     
+        # Force formula evaluation on load
+        wb.calculation.calcMode = 'auto'
+        wb.calculation.fullCalcOnLoad = True
+
         # Save to BytesIO buffer
         out_buf = io.BytesIO()
         wb.save(out_buf)

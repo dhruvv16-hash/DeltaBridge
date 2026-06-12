@@ -1084,6 +1084,8 @@
                     document.getElementById('buffer-group').style.display = 'block';
                     document.getElementById('fixed-amount-group').style.display = 'none';
                     fetchAccounts();
+                    fetchPnL();
+                    fetchAnalytics();
                 } else {
                     const data = await response.json();
                     showToast(data.message || "Failed to add account", false);
@@ -1201,6 +1203,9 @@
                 
                 if (response.ok) {
                     showToast(is_active ? "Account enabled" : "Account disabled");
+                    fetchAccounts();
+                    fetchPnL();
+                    fetchAnalytics();
                 } else {
                     showToast("Failed to update status", false);
                 }
@@ -1240,6 +1245,8 @@
                 if (response.ok) {
                     showToast("Account deleted successfully!");
                     fetchAccounts();
+                    fetchPnL();
+                    fetchAnalytics();
                 } else {
                     showToast("Failed to delete account", false);
                 }
@@ -1603,6 +1610,49 @@
                 `;
                 closedContainer.appendChild(row);
             });
+
+            // Append TOTAL row at the bottom of the table
+            let totalSize = 0;
+            let totalGross = 0;
+            let totalFees = 0;
+            let totalNet = 0;
+            
+            window.closedPositionsCache.forEach(pos => {
+                totalSize += parseFloat(pos.closed_size || 0);
+                totalGross += parseFloat(pos.realized_pnl || 0);
+                totalFees += parseFloat(pos.fees || 0);
+                totalNet += parseFloat(pos.net_pnl || (parseFloat(pos.realized_pnl || 0) - parseFloat(pos.fees || 0)));
+            });
+
+            const totalRow = document.createElement('tr');
+            totalRow.style.backgroundColor = 'rgba(26, 26, 70, 0.4)';
+            totalRow.style.borderTop = '2px solid var(--border-color)';
+            totalRow.style.borderBottom = '2px solid var(--border-color)';
+            totalRow.style.fontWeight = 'bold';
+            
+            const grossColor = totalGross > 0 ? 'var(--success)' : (totalGross < 0 ? 'var(--danger)' : 'var(--text-primary)');
+            const grossPrefix = totalGross > 0 ? '+' : '';
+            
+            const netColor = totalNet > 0 ? 'var(--success)' : (totalNet < 0 ? 'var(--danger)' : 'var(--text-primary)');
+            const netPrefix = totalNet > 0 ? '+' : '';
+            
+            totalRow.innerHTML = `
+                <td style="padding: 1rem; color: var(--text-primary); font-weight: 700;">TOTAL</td>
+                <td style="padding: 1rem;"></td>
+                <td style="padding: 1rem;"></td>
+                <td style="padding: 1rem;"></td>
+                <td style="padding: 1rem; color: var(--text-primary); font-size: 0.85rem;">${totalSize.toFixed(2)}</td>
+                <td style="padding: 1rem;"></td>
+                <td style="padding: 1rem;"></td>
+                <td style="padding: 1rem; font-weight: 700; color: ${grossColor}; font-size: 0.9rem;">
+                    ${grossPrefix}${totalGross.toFixed(4)}
+                </td>
+                <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${totalFees.toFixed(4)}</td>
+                <td style="padding: 1rem; font-weight: 700; color: ${netColor}; font-size: 0.9rem;">
+                    ${netPrefix}${totalNet.toFixed(4)}
+                </td>
+            `;
+            closedContainer.appendChild(totalRow);
         }
 
         function toggleExpandClosedPositions() {
