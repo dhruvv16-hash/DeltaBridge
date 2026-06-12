@@ -2666,6 +2666,11 @@
         fetchLogs();
         fetchEmailSettings();
         fetchPnL();
+
+        // Start auto-refresh intervals for live trading data
+        setInterval(fetchPnL, 5000);       // Auto-refresh positions & unrealized PnL every 5 seconds
+        setInterval(fetchAccounts, 10000); // Auto-refresh account balances & status every 10 seconds
+        setInterval(fetchLogs, 10000);     // Auto-refresh trade logs every 10 seconds
     </script>
 </body>
 </html>
