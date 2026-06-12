@@ -1871,13 +1871,11 @@ def close_all_positions(client):
 
 def execute_trades_background(accounts_data, ticker, action, source="webhook", payload=None):
     """Processes trading signals across all configured accounts in a background thread."""
-    with app.app_context():
-        logger.info(f"Starting background trade execution for {ticker} (Action: {action}, Source: {source}, Payload: {payload}) on {len(accounts_data)} accounts...")
-        
-        # Retrieve product details in background
-        product = public_delta_client.get_product_by_symbol(ticker)
-        if not product:
-            logger.error(f"Symbol '{ticker}' not found on Delta Exchange in background. Aborting.")
+    # 1. Retrieve product details (network call, outside DB context)
+    product = public_delta_client.get_product_by_symbol(ticker)
+    if not product:
+        logger.error(f"Symbol '{ticker}' not found on Delta Exchange in background. Aborting.")
+        with app.app_context():
             log_entry = TradeLog(
                 ticker=ticker,
                 action=action,
@@ -1888,448 +1886,182 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
             db.session.add(log_entry)
             db.session.commit()
             
-            # Send Notification
-            title = f"🔴 Trade Alert Failure: {ticker} ({action.upper()})"
-            msg = f"Symbol <b>'{ticker}'</b> not found on Delta Exchange."
-            send_notification(title, msg, 15680580)
-            
-            return [{
-                "account_id": acc["id"],
-                "name": acc["name"],
-                "success": False,
-                "message": f"Symbol {ticker} not found on Delta Exchange"
-            } for acc in accounts_data]
+        # Send Notification
+        title = f"🔴 Trade Alert Failure: {ticker} ({action.upper()})"
+        msg = f"Symbol <b>'{ticker}'</b> not found on Delta Exchange."
+        send_notification(title, msg, 15680580)
+        
+        return [{
+            "account_id": acc["id"],
+            "name": acc["name"],
+            "success": False,
+            "message": f"Symbol {ticker} not found on Delta Exchange"
+        } for acc in accounts_data]
 
-        product_id = product.get("id")
-        symbol = product.get("symbol")
-        contract_value_str = product.get("contract_value", "0.01")
+    product_id = product.get("id")
+    symbol = product.get("symbol")
+    contract_value_str = product.get("contract_value", "0.01")
+    try:
+        contract_value = float(contract_value_str)
+    except ValueError:
+        contract_value = 0.01
+
+    logger.info(f"Parsed Product in background: {symbol} (ID: {product_id}, Lot Size: {contract_value})")
+    
+    results = []
+    
+    for acc in accounts_data:
+        acc_name = acc["name"]
+        acc_id = acc["id"]
+        account_result = {
+            "account_id": acc_id,
+            "name": acc_name,
+            "success": False
+        }
+        logger.info(f"Background processing for account '{acc_name}' (ID: {acc_id})...")
         try:
-            contract_value = float(contract_value_str)
-        except ValueError:
-            contract_value = 0.01
-
-        logger.info(f"Parsed Product in background: {symbol} (ID: {product_id}, Lot Size: {contract_value})")
-        
-        results = []
-        
-        for acc in accounts_data:
-            acc_name = acc["name"]
-            acc_id = acc["id"]
-            account_result = {
-                "account_id": acc_id,
-                "name": acc_name,
-                "success": False
-            }
-            logger.info(f"Background processing for account '{acc_name}' (ID: {acc_id})...")
-            try:
-                # Initialize account-specific Delta REST Client
-                client = DeltaClient(
-                    api_key=acc["api_key"],
-                    api_secret=acc["api_secret"],
-                    base_url=Config.BASE_URL
-                )
-                
-                # Retrieve fresh DB details if it's a real account
-                acc_db = None
-                if acc_id != 0:
-                    acc_db = Account.query.get(acc_id)
-                
-                is_circuit_broken_flag = acc_db.is_circuit_broken if acc_db else False
-                daily_loss_limit_val = acc_db.daily_loss_limit if acc_db else None
-                
-                # Check circuit breaker before processing
-                if is_circuit_broken_flag:
-                    if action in ["buy", "sell"]:
-                        logger.warning(f"Trading halted on account '{acc_name}' (ID: {acc_id}): Daily drawdown circuit breaker is tripped.")
-                        account_result.update({"success": False, "message": "Circuit breaker is broken (trading halted)"})
-                        results.append(account_result)
-                        continue
-                        
-                # Perform daily drawdown calculation if limit is configured
-                if not is_circuit_broken_flag and daily_loss_limit_val is not None:
-                    daily_pnl = get_daily_pnl(client)
-                    logger.info(f"Account '{acc_name}' daily net PnL: {daily_pnl:.4f} USD (Limit: {daily_loss_limit_val:.4f} USD)")
-                    if daily_pnl < 0 and abs(daily_pnl) >= daily_loss_limit_val:
-                        logger.warning(f"Daily loss limit reached on account '{acc_name}'! Breached limit: {daily_loss_limit_val:.2f} USD. Tripping circuit breaker...")
-                        # 1. Trip circuit breaker in DB
-                        if acc_db:
-                            acc_db.is_circuit_broken = True
-                            db.session.commit()
-                        
-                        # 2. Close all positions
-                        close_all_positions(client)
-                        
-                        # 3. Dispatch alert
-                        title = f"🚨 Circuit Breaker Tripped: {acc_name}"
-                        notification_message = (
-                            f"Account: <b>{acc_name}</b>\n"
-                            f"Status: <b>HALTED</b>\n"
-                            f"Daily Loss Breach: <b>{abs(daily_pnl):.2f} USD</b> (Limit: {daily_loss_limit_val:.2f} USD)\n"
-                            f"Action: <b>All positions automatically closed</b>"
-                        )
-                        send_notification(title, notification_message, 15549011)
-                        
-                        account_result.update({"success": False, "message": f"Circuit breaker tripped. Daily loss: {abs(daily_pnl):.2f} USD"})
-                        results.append(account_result)
-                        continue
-                
-                # Resolve Strategy and StrategyState
-                strategy_name = None
-                if payload:
-                    strategy_name = payload.get("strategy") or payload.get("strategy_name")
-                
-                strategy = None
-                if strategy_name and acc_id != 0:
-                    strategy_name = strategy_name.strip()
-                    strategy = Strategy.query.filter_by(account_id=acc_id).filter(Strategy.name.ilike(strategy_name)).first()
-                    if not strategy:
-                        logger.warning(f"Strategy '{strategy_name}' not found for account '{acc_name}'. Skipping execution.")
-                        account_result.update({"success": False, "message": f"Strategy '{strategy_name}' not found"})
-                        results.append(account_result)
-                        continue
-                    if not strategy.is_active:
-                        logger.info(f"Strategy '{strategy.name}' is inactive for account '{acc_name}'. Skipping execution.")
-                        account_result.update({"success": True, "message": f"Strategy '{strategy.name}' is inactive, skipped"})
-                        results.append(account_result)
-                        continue
-                
-                # Fetch or create StrategyState for this virtual position
-                strategy_id = strategy.id if strategy else None
-                state = None
-                if acc_id != 0:
-                    state = StrategyState.query.filter_by(account_id=acc_id, symbol=symbol, strategy_id=strategy_id).first()
-                    if not state:
-                        state = StrategyState(account_id=acc_id, symbol=symbol, strategy_id=strategy_id, position_size=0.0)
-                        db.session.add(state)
-                        db.session.commit()
-
-                # Check for close/exit actions
-                if action in ["close_long", "close_short"]:
-                    if strategy:
-                        # Strategy-specific close logic using virtual position size
-                        pos_size = abs(int(float(state.position_size)))
-                        if pos_size == 0:
-                            logger.info(f"Virtual position size is 0 for strategy '{strategy.name}' on account '{acc_name}'.")
-                            account_result.update({"success": True, "message": "No virtual position size to close"})
-                            results.append(account_result)
-                            continue
-
-                        is_long = state.position_size > 0
-                        is_short = state.position_size < 0
-
-                        if action == "close_long" and not is_long:
-                            logger.warning(f"Received close_long alert but virtual position is not LONG (size: {state.position_size}) for strategy '{strategy.name}' on account '{acc_name}'. Ignoring.")
-                            account_result.update({"success": True, "message": "Current virtual position is not LONG, ignoring close_long"})
-                            results.append(account_result)
-                            continue
-
-                        if action == "close_short" and not is_short:
-                            logger.warning(f"Received close_short alert but virtual position is not SHORT (size: {state.position_size}) for strategy '{strategy.name}' on account '{acc_name}'. Ignoring.")
-                            account_result.update({"success": True, "message": "Current virtual position is not SHORT, ignoring close_short"})
-                            results.append(account_result)
-                            continue
-
-                        entry_px = float(state.entry_price or 0.0)
-                        close_side = "sell" if is_long else "buy"
-                        res = client.place_order(
-                            product_id=product_id,
-                            size=pos_size,
-                            side=close_side,
-                            order_type="market_order",
-                            reduce_only=False
-                        )
-
-                        if res.get("success"):
-                            order_res = res.get("result", {})
-                            try:
-                                exit_px = float(order_res.get("average_fill_price") or 0.0)
-                            except (ValueError, TypeError):
-                                exit_px = 0.0
-                            if exit_px <= 0:
-                                ticker_data = client.get_ticker(symbol)
-                                exit_px = float(ticker_data.get("mark_price") or ticker_data.get("last_price") or 0.0)
-
-                            pnl_val = 0.0
-                            if entry_px > 0 and exit_px > 0:
-                                direction = 1 if is_long else -1
-                                pnl_val = (exit_px - entry_px) * pos_size * contract_value * direction
-
-                            pnl_str = f"PnL: {pnl_val:+.2f} USD"
-                            logger.info(f"Successfully closed virtual position for strategy '{strategy.name}' on account '{acc_name}'. Order ID: {order_res.get('id')} - {pnl_str}")
-                            
-                            # Reset virtual position
-                            state.position_size = 0.0
-                            state.entry_price = None
-                            state.current_sl = None
-                            state.tp1_price = None
-                            state.tp2_price = None
-                            state.tp1_hit = False
-                            state.tp2_hit = False
-                            db.session.commit()
-
-                            account_result.update({
-                                "success": True,
-                                "message": f"Closed strategy '{strategy.name}' position of {pos_size} Lots. {pnl_str}",
-                                "response": res
-                            })
-                        else:
-                            logger.error(f"Failed to close virtual position for strategy '{strategy.name}' on account '{acc_name}': {res}")
-                            account_result.update({"success": False, "message": "Delta API Order Placement Failed", "details": res})
-
-                    else:
-                        # Account-level default close logic
-                        logger.info(f"Processing close request for {symbol} on account '{acc_name}'...")
-                        pos = client.get_position(product_id)
-                        if not pos:
-                            logger.info(f"No open position found for {symbol} on account '{acc_name}'.")
-                            account_result.update({"success": True, "message": "No open position to close"})
-                            results.append(account_result)
-                            continue
-
-                        try:
-                            pos_size = abs(int(float(pos.get("size", 0))))
-                        except (ValueError, TypeError):
-                            pos_size = 0
-
-                        if pos_size == 0:
-                            logger.info(f"Position size is 0 for {symbol} on account '{acc_name}'.")
-                            account_result.update({"success": True, "message": "No position size to close"})
-                            results.append(account_result)
-                            continue
-
-                        pos_side = pos.get("side", "").lower()
-                        try:
-                            raw_size = float(pos.get("size", 0))
-                        except (ValueError, TypeError):
-                            raw_size = 0.0
-
-                        is_long = pos_side == "buy" or raw_size > 0
-                        is_short = pos_side == "sell" or raw_size < 0
-
-                        # Guard checks to ensure we only close matching position directions
-                        if action == "close_long" and not is_long:
-                            logger.warning(f"Received close_long alert but position is not LONG (size: {raw_size}) on account '{acc_name}'. Ignoring.")
-                            account_result.update({"success": True, "message": "Current position is not LONG, ignoring close_long"})
-                            results.append(account_result)
-                            continue
-
-                        if action == "close_short" and not is_short:
-                            logger.warning(f"Received close_short alert but position is not SHORT (size: {raw_size}) on account '{acc_name}'. Ignoring.")
-                            account_result.update({"success": True, "message": "Current position is not SHORT, ignoring close_short"})
-                            results.append(account_result)
-                            continue
-
-                        # Calculate estimated PnL before closing
-                        entry_px = float(pos.get("entry_price") or pos.get("avg_entry_price") or 0)
-                        upnl = pos.get("unrealized_pnl") or pos.get("upnl") or pos.get("pnl") or 0.0
-                        try:
-                            pnl_val = float(upnl)
-                        except (ValueError, TypeError):
-                            pnl_val = 0.0
-
-                        close_side = "sell" if is_long else "buy"
-                        res = client.place_order(
-                            product_id=product_id,
-                            size=pos_size,
-                            side=close_side,
-                            order_type="market_order",
-                            reduce_only=True
-                        )
-
-                        if res.get("success"):
-                            order_res = res.get("result", {})
-                            try:
-                                exit_px = float(order_res.get("average_fill_price") or 0.0)
-                            except (ValueError, TypeError):
-                                exit_px = 0.0
-                                
-                            if entry_px > 0 and exit_px > 0:
-                                direction = 1 if is_long else -1
-                                pnl_val = (exit_px - entry_px) * pos_size * contract_value * direction
-
-                            pnl_str = f"PnL: {pnl_val:+.2f} USD"
-                            logger.info(f"Successfully closed position for {symbol} on account '{acc_name}'. Order ID: {order_res.get('id')} - {pnl_str}")
-                            
-                            # Reset default virtual position
-                            if state:
-                                state.position_size = 0.0
-                                state.entry_price = None
-                                state.current_sl = None
-                                state.tp1_price = None
-                                state.tp2_price = None
-                                state.tp1_hit = False
-                                state.tp2_hit = False
-                                db.session.commit()
-
-                            account_result.update({
-                                "success": True,
-                                "message": f"Closed position of {pos_size} Lots. {pnl_str}",
-                                "response": res
-                            })
-                        else:
-                            logger.error(f"Failed to close position on account '{acc_name}': {res}")
-                            account_result.update({"success": False, "message": "Delta API Order Placement Failed", "details": res})
-                
-                # Check for buy/sell entries
-                else:
-                    if strategy:
-                        # Strategy-specific Opposing reversal checks
-                        if state and abs(state.position_size) > 0:
-                            is_reversal = (action == "buy" and state.position_size < 0) or (action == "sell" and state.position_size > 0)
-                            if is_reversal:
-                                logger.info(f"Reversal detected! Closing opposing strategy '{strategy.name}' virtual position of size {abs(state.position_size)} first on account '{acc_name}'...")
-                                close_side = "buy" if action == "buy" else "sell"
-                                close_res = client.place_order(
-                                    product_id=product_id,
-                                    size=int(abs(state.position_size)),
-                                    side=close_side,
-                                    order_type="market_order",
-                                    reduce_only=False
-                                )
-                                if close_res.get("success"):
-                                    logger.info(f"Opposing strategy '{strategy.name}' virtual position closed on account '{acc_name}'. Sleeping for 1.5 seconds for margin release...")
-                                    time.sleep(1.5)
-                                    # Reset state
-                                    state.position_size = 0.0
-                                    state.entry_price = None
-                                    db.session.commit()
-                                else:
-                                    logger.error(f"Failed to close opposing virtual position for strategy '{strategy.name}' on account '{acc_name}' during reversal: {close_res}")
-
-                    else:
-                        # Account-level default Opposing reversal checks
-                        pos = client.get_position(product_id)
-                        if pos:
-                            try:
-                                pos_size = float(pos.get("size", 0))
-                            except (ValueError, TypeError):
-                                pos_size = 0.0
-
-                            is_reversal = (action == "buy" and pos_size < 0) or (action == "sell" and pos_size > 0)
-                            if is_reversal and abs(pos_size) > 0:
-                                logger.info(f"Reversal detected! Closing opposing position of size {abs(pos_size)} first on account '{acc_name}'...")
-                                close_side = "buy" if action == "buy" else "sell"
-                                close_res = client.place_order(
-                                    product_id=product_id,
-                                    size=int(abs(pos_size)),
-                                    side=close_side,
-                                    order_type="market_order",
-                                    reduce_only=True
-                                )
-                                if close_res.get("success"):
-                                    logger.info(f"Opposing position closed on account '{acc_name}'. Sleeping for 1.5 seconds for margin release...")
-                                    time.sleep(1.5)
-                                    if state:
-                                        state.position_size = 0.0
-                                        state.entry_price = None
-                                        db.session.commit()
-                                else:
-                                    logger.error(f"Failed to close opposing position on account '{acc_name}' during reversal: {close_res}")
-
-                    # Fetch ticker details for price
-                    ticker_data = client.get_ticker(symbol)
-                    price_str = ticker_data.get("mark_price") or ticker_data.get("last_price") if ticker_data else None
-                    try:
-                        price = float(price_str)
-                    except (ValueError, TypeError):
-                        logger.error(f"Invalid price value received for {symbol} on account '{acc_name}': '{price_str}'")
-                        account_result.update({"success": False, "message": "Failed to fetch symbol price"})
-                        results.append(account_result)
-                        continue
-
-                    # Fetch account available balance
-                    balance, asset = client.get_available_balance()
-                    if balance <= 0:
-                        logger.warning(f"Available balance is 0 on account '{acc_name}'.")
-                        account_result.update({"success": False, "message": "Available balance is 0"})
-                        results.append(account_result)
-                        continue
-
-                    # Calculate quantity and lots
-                    qty_lots = None
-                    sizing_desc = ""
-                    lot_value_usd = price * contract_value
+            # Initialize account-specific Delta REST Client
+            client = DeltaClient(
+                api_key=acc["api_key"],
+                api_secret=acc["api_secret"],
+                base_url=Config.BASE_URL
+            )
+            
+            # Retrieve fresh DB details in a short context
+            is_circuit_broken_flag = False
+            daily_loss_limit_val = None
+            if acc_id != 0:
+                with app.app_context():
+                    acc_db = db.session.get(Account, acc_id)
+                    if acc_db:
+                        is_circuit_broken_flag = acc_db.is_circuit_broken
+                        daily_loss_limit_val = acc_db.daily_loss_limit
+            
+            # Check circuit breaker before processing
+            if is_circuit_broken_flag:
+                if action in ["buy", "sell"]:
+                    logger.warning(f"Trading halted on account '{acc_name}' (ID: {acc_id}): Daily drawdown circuit breaker is tripped.")
+                    account_result.update({"success": False, "message": "Circuit breaker is broken (trading halted)"})
+                    results.append(account_result)
+                    continue
                     
-                    if lot_value_usd <= 0:
-                        logger.error(f"Invalid lot value calculation for account '{acc_name}'")
-                        account_result.update({"success": False, "message": "Invalid lot value calculation"})
-                        results.append(account_result)
-                        continue
-                        
-                    if payload and ("quantity" in payload or "qty" in payload):
-                        payload_qty = payload.get("quantity") or payload.get("qty")
-                        if payload_qty is not None:
-                            try:
-                                qty_base = float(payload_qty)
-                                qty_lots = int(math.floor(qty_base / contract_value))
-                                sizing_desc = f"Quantity from payload = {qty_base} (Lots = {qty_lots})"
-                            except (ValueError, TypeError) as e:
-                                logger.error(f"Invalid quantity parameter in payload: {payload_qty}. Falling back to account sizing.")
-                                
-                    if qty_lots is None:
-                        if strategy:
-                            # Strategy Sizing Mode
-                            leverage = strategy.leverage
-                            sizing_type = strategy.sizing_type
-                            fixed_amount = strategy.fixed_amount
-                            balance_buffer_pct = strategy.balance_buffer_pct
-                            
-                            if sizing_type == "fixed":
-                                if fixed_amount > balance:
-                                    logger.warning(f"Insufficient balance on account '{acc_name}' for strategy '{strategy.name}': Fixed Margin of {fixed_amount} {asset} exceeds balance {balance} {asset}.")
-                                    account_result.update({"success": False, "message": f"Insufficient balance (need {fixed_amount} {asset}, have {balance} {asset})"})
-                                    results.append(account_result)
-                                    continue
-                                buying_power = fixed_amount * leverage
-                                sizing_desc = f"Strategy '{strategy.name}' Fixed Margin = {fixed_amount} {asset}"
-                            else:
-                                buying_power = balance * leverage * (balance_buffer_pct / 100.0)
-                                sizing_desc = f"Strategy '{strategy.name}' Buffer = {balance_buffer_pct}%"
-                        else:
-                            # Account-level Default Sizing Mode
-                            leverage = acc["leverage"]
-                            sizing_type = acc.get("sizing_type") or "percentage"
-                            fixed_amount_val = acc.get("fixed_amount")
-                            fixed_amount = float(fixed_amount_val) if fixed_amount_val is not None else 10.0
-                            
-                            if sizing_type == "fixed":
-                                if fixed_amount > balance:
-                                    logger.warning(f"Insufficient balance on account '{acc_name}': Fixed Margin of {fixed_amount} {asset} exceeds balance {balance} {asset}.")
-                                    account_result.update({"success": False, "message": f"Insufficient balance (need {fixed_amount} {asset}, have {balance} {asset})"})
-                                    results.append(account_result)
-                                    continue
-                                buying_power = fixed_amount * leverage
-                                sizing_desc = f"Fixed Margin = {fixed_amount} {asset}"
-                            else:
-                                buffer_pct = float(acc.get("balance_buffer_pct", 55.0))
-                                buying_power = balance * leverage * (buffer_pct / 100.0)
-                                sizing_desc = f"Buffer = {buffer_pct}%"
-                                
-                        qty_lots = int(math.floor(buying_power / lot_value_usd))
-                        
-                    # Required margin check
-                    used_leverage = strategy.leverage if strategy else acc["leverage"]
-                    required_margin = (qty_lots * lot_value_usd) / used_leverage
-                    if required_margin > balance:
-                        logger.warning(f"Insufficient balance on account '{acc_name}': Required margin of {required_margin:.4f} {asset} for {qty_lots} lots exceeds available balance {balance} {asset}.")
-                        account_result.update({"success": False, "message": f"Insufficient balance (need {required_margin:.2f} {asset} margin, have {balance:.2f} {asset})"})
-                        results.append(account_result)
-                        continue
-                        
-                    logger.info(f"Sizing details for account '{acc_name}': Balance = {balance} {asset}, Leverage = {used_leverage}x, "
-                                f"{sizing_desc}, Lot USD Value = {lot_value_usd:.4f}, Calculated Qty = {qty_lots} Lots")
+            # Perform daily drawdown calculation if limit is configured (network call, outside DB context)
+            if not is_circuit_broken_flag and daily_loss_limit_val is not None:
+                daily_pnl = get_daily_pnl(client)
+                logger.info(f"Account '{acc_name}' daily net PnL: {daily_pnl:.4f} USD (Limit: {daily_loss_limit_val:.4f} USD)")
+                if daily_pnl < 0 and abs(daily_pnl) >= daily_loss_limit_val:
+                    logger.warning(f"Daily loss limit reached on account '{acc_name}'! Breached limit: {daily_loss_limit_val:.2f} USD. Tripping circuit breaker...")
+                    
+                    # 1. Trip circuit breaker in DB (short context)
+                    if acc_id != 0:
+                        with app.app_context():
+                            acc_db = db.session.get(Account, acc_id)
+                            if acc_db:
+                                acc_db.is_circuit_broken = True
+                                db.session.commit()
+                    
+                    # 2. Close all positions (network call)
+                    close_all_positions(client)
+                    
+                    # 3. Dispatch alert
+                    title = f"🚨 Circuit Breaker Tripped: {acc_name}"
+                    notification_message = (
+                        f"Account: <b>{acc_name}</b>\n"
+                        f"Status: <b>HALTED</b>\n"
+                        f"Daily Loss Breach: <b>{abs(daily_pnl):.2f} USD</b> (Limit: {daily_loss_limit_val:.2f} USD)\n"
+                        f"Action: <b>All positions automatically closed</b>"
+                    )
+                    send_notification(title, notification_message, 15549011)
+                    
+                    account_result.update({"success": False, "message": f"Circuit breaker tripped. Daily loss: {abs(daily_pnl):.2f} USD"})
+                    results.append(account_result)
+                    continue
+            
+            # Resolve Strategy and StrategyState (short context)
+            strategy_name = None
+            if payload:
+                strategy_name = payload.get("strategy") or payload.get("strategy_name")
+            
+            strategy_id = None
+            strategy_leverage = None
+            strategy_sizing_type = None
+            strategy_fixed_amount = None
+            strategy_balance_buffer_pct = None
+            strategy_is_active = True
+            
+            if strategy_name and acc_id != 0:
+                strategy_name = strategy_name.strip()
+                with app.app_context():
+                    strat_db = Strategy.query.filter_by(account_id=acc_id).filter(Strategy.name.ilike(strategy_name)).first()
+                    if strat_db:
+                        strategy_id = strat_db.id
+                        strategy_is_active = strat_db.is_active
+                        strategy_leverage = strat_db.leverage
+                        strategy_sizing_type = strat_db.sizing_type
+                        strategy_fixed_amount = strat_db.fixed_amount
+                        strategy_balance_buffer_pct = strat_db.balance_buffer_pct
+                    else:
+                        strategy_is_active = None
+                
+                if strategy_is_active is None:
+                    logger.warning(f"Strategy '{strategy_name}' not found for account '{acc_name}'. Skipping execution.")
+                    account_result.update({"success": False, "message": f"Strategy '{strategy_name}' not found"})
+                    results.append(account_result)
+                    continue
+                if not strategy_is_active:
+                    logger.info(f"Strategy '{strategy_name}' is inactive for account '{acc_name}'. Skipping execution.")
+                    account_result.update({"success": True, "message": f"Strategy '{strategy_name}' is inactive, skipped"})
+                    results.append(account_result)
+                    continue
+            
+            # Fetch or create StrategyState for this virtual position (short context)
+            state_id = None
+            state_position_size = 0.0
+            state_entry_price = None
+            
+            if acc_id != 0:
+                with app.app_context():
+                    state_db = StrategyState.query.filter_by(account_id=acc_id, symbol=symbol, strategy_id=strategy_id).first()
+                    if not state_db:
+                        state_db = StrategyState(account_id=acc_id, symbol=symbol, strategy_id=strategy_id, position_size=0.0)
+                        db.session.add(state_db)
+                        db.session.commit()
+                    state_id = state_db.id
+                    state_position_size = state_db.position_size
+                    state_entry_price = state_db.entry_price
 
-                    if qty_lots <= 0:
-                        logger.warning(f"Insufficient balance ({balance} {asset}) for leverage {used_leverage}x to open even 1 lot on account '{acc_name}'.")
-                        account_result.update({"success": False, "message": "Insufficient balance for 1 lot"})
+            # Check for close/exit actions
+            if action in ["close_long", "close_short"]:
+                if strategy_name:
+                    # Strategy-specific close logic using virtual position size
+                    pos_size = abs(int(float(state_position_size)))
+                    if pos_size == 0:
+                        logger.info(f"Virtual position size is 0 for strategy '{strategy_name}' on account '{acc_name}'.")
+                        account_result.update({"success": True, "message": "No virtual position size to close"})
                         results.append(account_result)
                         continue
 
-                    # Execute market order to enter trade
+                    is_long = state_position_size > 0
+                    is_short = state_position_size < 0
+
+                    if action == "close_long" and not is_long:
+                        logger.warning(f"Received close_long alert but virtual position is not LONG (size: {state_position_size}) for strategy '{strategy_name}' on account '{acc_name}'. Ignoring.")
+                        account_result.update({"success": True, "message": "Current virtual position is not LONG, ignoring close_long"})
+                        results.append(account_result)
+                        continue
+
+                    if action == "close_short" and not is_short:
+                        logger.warning(f"Received close_short alert but virtual position is not SHORT (size: {state_position_size}) for strategy '{strategy_name}' on account '{acc_name}'. Ignoring.")
+                        account_result.update({"success": True, "message": "Current virtual position is not SHORT, ignoring close_short"})
+                        results.append(account_result)
+                        continue
+
+                    entry_px = float(state_entry_price or 0.0)
+                    close_side = "sell" if is_long else "buy"
                     res = client.place_order(
                         product_id=product_id,
-                        size=qty_lots,
-                        side=action,
+                        size=pos_size,
+                        side=close_side,
                         order_type="market_order",
                         reduce_only=False
                     )
@@ -2337,66 +2069,380 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
                     if res.get("success"):
                         order_res = res.get("result", {})
                         try:
-                            fill_px = float(order_res.get("average_fill_price") or order_res.get("price") or 0.0)
+                            exit_px = float(order_res.get("average_fill_price") or 0.0)
                         except (ValueError, TypeError):
-                            fill_px = 0.0
-                        if fill_px <= 0:
-                            fill_px = price
-                            
-                        # Update virtual position tracking in database
-                        if state:
-                            signed_size = qty_lots if action == "buy" else -qty_lots
-                            state.position_size = signed_size
-                            state.entry_price = fill_px
-                            state.current_sl = None
-                            state.tp1_price = None
-                            state.tp2_price = None
-                            state.tp1_hit = False
-                            state.tp2_hit = False
-                            db.session.commit()
-                            logger.info(f"Updated StrategyState: {symbol} (Strategy ID: {strategy_id}, Size: {signed_size}, Entry: {fill_px})")
-                            
-                        logger.info(f"Successfully entered position for {symbol} on account '{acc_name}'. Order ID: {order_res.get('id')}")
-                        account_result.update({"success": True, "response": res})
+                            exit_px = 0.0
+                        if exit_px <= 0:
+                            ticker_data = client.get_ticker(symbol)
+                            exit_px = float(ticker_data.get("mark_price") or ticker_data.get("last_price") or 0.0)
+
+                        pnl_val = 0.0
+                        if entry_px > 0 and exit_px > 0:
+                            direction = 1 if is_long else -1
+                            pnl_val = (exit_px - entry_px) * pos_size * contract_value * direction
+
+                        pnl_str = f"PnL: {pnl_val:+.2f} USD"
+                        logger.info(f"Successfully closed virtual position for strategy '{strategy_name}' on account '{acc_name}'. Order ID: {order_res.get('id')} - {pnl_str}")
+                        
+                        # Reset virtual position (short context)
+                        if state_id:
+                            with app.app_context():
+                                state_db = db.session.get(StrategyState, state_id)
+                                if state_db:
+                                    state_db.position_size = 0.0
+                                    state_db.entry_price = None
+                                    state_db.current_sl = None
+                                    state_db.tp1_price = None
+                                    state_db.tp2_price = None
+                                    state_db.tp1_hit = False
+                                    state_db.tp2_hit = False
+                                    db.session.commit()
+
+                        account_result.update({
+                            "success": True,
+                            "message": f"Closed strategy '{strategy_name}' position of {pos_size} Lots. {pnl_str}",
+                            "response": res
+                        })
                     else:
-                        logger.error(f"Failed to place order on account '{acc_name}': {res}")
+                        logger.error(f"Failed to close virtual position for strategy '{strategy_name}' on account '{acc_name}': {res}")
                         account_result.update({"success": False, "message": "Delta API Order Placement Failed", "details": res})
 
-            except Exception as acc_e:
-                logger.exception(f"Exception processing webhook in background for account '{acc_name}': {acc_e}")
-                account_result.update({"success": False, "message": "Internal processing exception", "error": str(acc_e)})
-                
-            results.append(account_result)
-            
-        # Logging results to database
-        status = "success"
-        details_list = []
-        success_count = sum(1 for r in results if r["success"])
-        
-        if len(results) == 0:
-            status = "failed"
-            details_list.append("No active accounts to execute.")
-        elif success_count == len(results):
-            status = "success"
-        elif success_count == 0:
-            status = "failed"
-        else:
-            status = "partial"
-            
-        for r in results:
-            name = r["name"]
-            if r["success"]:
-                msg = r.get("message") or "Order placed successfully"
-                order_id = r.get("response", {}).get("result", {}).get("id")
-                if order_id:
-                    details_list.append(f"{name}: Success (Order ID: {order_id})")
                 else:
-                    details_list.append(f"{name}: Success ({msg})")
+                    # Account-level default close logic (network calls outside DB context)
+                    logger.info(f"Processing close request for {symbol} on account '{acc_name}'...")
+                    pos = client.get_position(product_id)
+                    if not pos:
+                        logger.info(f"No open position found for {symbol} on account '{acc_name}'.")
+                        account_result.update({"success": True, "message": "No open position to close"})
+                        results.append(account_result)
+                        continue
+
+                    try:
+                        pos_size = abs(int(float(pos.get("size", 0))))
+                    except (ValueError, TypeError):
+                        pos_size = 0
+
+                    if pos_size == 0:
+                        logger.info(f"Position size is 0 for {symbol} on account '{acc_name}'.")
+                        account_result.update({"success": True, "message": "No position size to close"})
+                        results.append(account_result)
+                        continue
+
+                    pos_side = pos.get("side", "").lower()
+                    try:
+                        raw_size = float(pos.get("size", 0))
+                    except (ValueError, TypeError):
+                        raw_size = 0.0
+
+                    is_long = pos_side == "buy" or raw_size > 0
+                    is_short = pos_side == "sell" or raw_size < 0
+
+                    # Guard checks to ensure we only close matching position directions
+                    if action == "close_long" and not is_long:
+                        logger.warning(f"Received close_long alert but position is not LONG (size: {raw_size}) on account '{acc_name}'. Ignoring.")
+                        account_result.update({"success": True, "message": "Current position is not LONG, ignoring close_long"})
+                        results.append(account_result)
+                        continue
+
+                    if action == "close_short" and not is_short:
+                        logger.warning(f"Received close_short alert but position is not SHORT (size: {raw_size}) on account '{acc_name}'. Ignoring.")
+                        account_result.update({"success": True, "message": "Current position is not SHORT, ignoring close_short"})
+                        results.append(account_result)
+                        continue
+
+                    # Calculate estimated PnL before closing
+                    entry_px = float(pos.get("entry_price") or pos.get("avg_entry_price") or 0)
+                    upnl = pos.get("unrealized_pnl") or pos.get("upnl") or pos.get("pnl") or 0.0
+                    try:
+                        pnl_val = float(upnl)
+                    except (ValueError, TypeError):
+                        pnl_val = 0.0
+
+                    close_side = "sell" if is_long else "buy"
+                    res = client.place_order(
+                        product_id=product_id,
+                        size=pos_size,
+                        side=close_side,
+                        order_type="market_order",
+                        reduce_only=True
+                    )
+
+                    if res.get("success"):
+                        order_res = res.get("result", {})
+                        try:
+                            exit_px = float(order_res.get("average_fill_price") or 0.0)
+                        except (ValueError, TypeError):
+                            exit_px = 0.0
+                            
+                        if entry_px > 0 and exit_px > 0:
+                            direction = 1 if is_long else -1
+                            pnl_val = (exit_px - entry_px) * pos_size * contract_value * direction
+
+                        pnl_str = f"PnL: {pnl_val:+.2f} USD"
+                        logger.info(f"Successfully closed position for {symbol} on account '{acc_name}'. Order ID: {order_res.get('id')} - {pnl_str}")
+                        
+                        # Reset default virtual position (short context)
+                        if state_id:
+                            with app.app_context():
+                                state_db = db.session.get(StrategyState, state_id)
+                                if state_db:
+                                    state_db.position_size = 0.0
+                                    state_db.entry_price = None
+                                    state_db.current_sl = None
+                                    state_db.tp1_price = None
+                                    state_db.tp2_price = None
+                                    state_db.tp1_hit = False
+                                    state_db.tp2_hit = False
+                                    db.session.commit()
+
+                        account_result.update({
+                            "success": True,
+                            "message": f"Closed position of {pos_size} Lots. {pnl_str}",
+                            "response": res
+                        })
+                    else:
+                        logger.error(f"Failed to close position on account '{acc_name}': {res}")
+                        account_result.update({"success": False, "message": "Delta API Order Placement Failed", "details": res})
+            
+            # Check for buy/sell entries
             else:
-                msg = r.get("message") or r.get("error") or "Unknown error"
-                details_list.append(f"{name}: Failed ({msg})")
+                if strategy_name:
+                    # Strategy-specific Opposing reversal checks
+                    if abs(state_position_size) > 0:
+                        is_reversal = (action == "buy" and state_position_size < 0) or (action == "sell" and state_position_size > 0)
+                        if is_reversal:
+                            logger.info(f"Reversal detected! Closing opposing strategy '{strategy_name}' virtual position of size {abs(state_position_size)} first on account '{acc_name}'...")
+                            close_side = "buy" if action == "buy" else "sell"
+                            close_res = client.place_order(
+                                product_id=product_id,
+                                size=int(abs(state_position_size)),
+                                side=close_side,
+                                order_type="market_order",
+                                reduce_only=False
+                            )
+                            if close_res.get("success"):
+                                logger.info(f"Opposing strategy '{strategy_name}' virtual position closed on account '{acc_name}'. Sleeping for 1.5 seconds for margin release...")
+                                time.sleep(1.5)
+                                # Reset state (short context)
+                                if state_id:
+                                    with app.app_context():
+                                        state_db = db.session.get(StrategyState, state_id)
+                                        if state_db:
+                                            state_db.position_size = 0.0
+                                            state_db.entry_price = None
+                                            db.session.commit()
+                                state_position_size = 0.0
+                            else:
+                                logger.error(f"Failed to close opposing virtual position for strategy '{strategy_name}' on account '{acc_name}' during reversal: {close_res}")
+
+                else:
+                    # Account-level default Opposing reversal checks (network calls outside DB context)
+                    pos = client.get_position(product_id)
+                    if pos:
+                        try:
+                            pos_size = float(pos.get("size", 0))
+                        except (ValueError, TypeError):
+                            pos_size = 0.0
+
+                        is_reversal = (action == "buy" and pos_size < 0) or (action == "sell" and pos_size > 0)
+                        if is_reversal and abs(pos_size) > 0:
+                            logger.info(f"Reversal detected! Closing opposing position of size {abs(pos_size)} first on account '{acc_name}'...")
+                            close_side = "buy" if action == "buy" else "sell"
+                            close_res = client.place_order(
+                                product_id=product_id,
+                                size=int(abs(pos_size)),
+                                side=close_side,
+                                order_type="market_order",
+                                reduce_only=True
+                            )
+                            if close_res.get("success"):
+                                logger.info(f"Opposing position closed on account '{acc_name}'. Sleeping for 1.5 seconds for margin release...")
+                                time.sleep(1.5)
+                                if state_id:
+                                    with app.app_context():
+                                        state_db = db.session.get(StrategyState, state_id)
+                                        if state_db:
+                                            state_db.position_size = 0.0
+                                            state_db.entry_price = None
+                                            db.session.commit()
+                            else:
+                                logger.error(f"Failed to close opposing position on account '{acc_name}' during reversal: {close_res}")
+
+                # Fetch ticker details for price (network call, outside DB context)
+                ticker_data = client.get_ticker(symbol)
+                price_str = ticker_data.get("mark_price") or ticker_data.get("last_price") if ticker_data else None
+                try:
+                    price = float(price_str)
+                except (ValueError, TypeError):
+                    logger.error(f"Invalid price value received for {symbol} on account '{acc_name}': '{price_str}'")
+                    account_result.update({"success": False, "message": "Failed to fetch symbol price"})
+                    results.append(account_result)
+                    continue
+
+                # Fetch account available balance (network call, outside DB context)
+                balance, asset = client.get_available_balance()
+                if balance <= 0:
+                    logger.warning(f"Available balance is 0 on account '{acc_name}'.")
+                    account_result.update({"success": False, "message": "Available balance is 0"})
+                    results.append(account_result)
+                    continue
+
+                # Calculate quantity and lots
+                qty_lots = None
+                sizing_desc = ""
+                lot_value_usd = price * contract_value
                 
-        details_str = "\n".join(details_list)
+                if lot_value_usd <= 0:
+                    logger.error(f"Invalid lot value calculation for account '{acc_name}'")
+                    account_result.update({"success": False, "message": "Invalid lot value calculation"})
+                    results.append(account_result)
+                    continue
+                    
+                if payload and ("quantity" in payload or "qty" in payload):
+                    payload_qty = payload.get("quantity") or payload.get("qty")
+                    if payload_qty is not None:
+                        try:
+                            qty_base = float(payload_qty)
+                            qty_lots = int(math.floor(qty_base / contract_value))
+                            sizing_desc = f"Quantity from payload = {qty_base} (Lots = {qty_lots})"
+                        except (ValueError, TypeError) as e:
+                            logger.error(f"Invalid quantity parameter in payload: {payload_qty}. Falling back to account sizing.")
+                            
+                if qty_lots is None:
+                    if strategy_name:
+                        # Strategy Sizing Mode
+                        leverage = strategy_leverage
+                        sizing_type = strategy_sizing_type
+                        fixed_amount = strategy_fixed_amount
+                        balance_buffer_pct = strategy_balance_buffer_pct
+                        
+                        if sizing_type == "fixed":
+                            if fixed_amount > balance:
+                                logger.warning(f"Insufficient balance on account '{acc_name}' for strategy '{strategy_name}': Fixed Margin of {fixed_amount} {asset} exceeds balance {balance} {asset}.")
+                                account_result.update({"success": False, "message": f"Insufficient balance (need {fixed_amount} {asset}, have {balance} {asset})"})
+                                results.append(account_result)
+                                continue
+                            buying_power = fixed_amount * leverage
+                            sizing_desc = f"Strategy '{strategy_name}' Fixed Margin = {fixed_amount} {asset}"
+                        else:
+                            buying_power = balance * leverage * (balance_buffer_pct / 100.0)
+                            sizing_desc = f"Strategy '{strategy_name}' Buffer = {balance_buffer_pct}%"
+                    else:
+                        # Account-level Default Sizing Mode
+                        leverage = acc["leverage"]
+                        sizing_type = acc.get("sizing_type") or "percentage"
+                        fixed_amount_val = acc.get("fixed_amount")
+                        fixed_amount = float(fixed_amount_val) if fixed_amount_val is not None else 10.0
+                        
+                        if sizing_type == "fixed":
+                            if fixed_amount > balance:
+                                logger.warning(f"Insufficient balance on account '{acc_name}': Fixed Margin of {fixed_amount} {asset} exceeds balance {balance} {asset}.")
+                                account_result.update({"success": False, "message": f"Insufficient balance (need {fixed_amount} {asset}, have {balance} {asset})"})
+                                results.append(account_result)
+                                continue
+                            buying_power = fixed_amount * leverage
+                            sizing_desc = f"Fixed Margin = {fixed_amount} {asset}"
+                        else:
+                            buffer_pct = float(acc.get("balance_buffer_pct", 55.0))
+                            buying_power = balance * leverage * (buffer_pct / 100.0)
+                            sizing_desc = f"Buffer = {buffer_pct}%"
+                            
+                    qty_lots = int(math.floor(buying_power / lot_value_usd))
+                    
+                # Required margin check
+                used_leverage = strategy_leverage if strategy_name else acc["leverage"]
+                required_margin = (qty_lots * lot_value_usd) / used_leverage
+                if required_margin > balance:
+                    logger.warning(f"Insufficient balance on account '{acc_name}': Required margin of {required_margin:.4f} {asset} for {qty_lots} lots exceeds available balance {balance} {asset}.")
+                    account_result.update({"success": False, "message": f"Insufficient balance (need {required_margin:.2f} {asset} margin, have {balance:.2f} {asset})"})
+                    results.append(account_result)
+                    continue
+                    
+                logger.info(f"Sizing details for account '{acc_name}': Balance = {balance} {asset}, Leverage = {used_leverage}x, "
+                            f"{sizing_desc}, Lot USD Value = {lot_value_usd:.4f}, Calculated Qty = {qty_lots} Lots")
+
+                if qty_lots <= 0:
+                    logger.warning(f"Insufficient balance ({balance} {asset}) for leverage {used_leverage}x to open even 1 lot on account '{acc_name}'.")
+                    account_result.update({"success": False, "message": "Insufficient balance for 1 lot"})
+                    results.append(account_result)
+                    continue
+
+                # Execute market order to enter trade (network call, outside DB context)
+                res = client.place_order(
+                    product_id=product_id,
+                    size=qty_lots,
+                    side=action,
+                    order_type="market_order",
+                    reduce_only=False
+                )
+
+                if res.get("success"):
+                    order_res = res.get("result", {})
+                    try:
+                        fill_px = float(order_res.get("average_fill_price") or order_res.get("price") or 0.0)
+                    except (ValueError, TypeError):
+                        fill_px = 0.0
+                    if fill_px <= 0:
+                        fill_px = price
+                        
+                    # Update virtual position tracking in database (short context)
+                    if state_id:
+                        with app.app_context():
+                            state_db = db.session.get(StrategyState, state_id)
+                            if state_db:
+                                signed_size = qty_lots if action == "buy" else -qty_lots
+                                state_db.position_size = signed_size
+                                state_db.entry_price = fill_px
+                                state_db.current_sl = None
+                                state_db.tp1_price = None
+                                state_db.tp2_price = None
+                                state_db.tp1_hit = False
+                                state_db.tp2_hit = False
+                                db.session.commit()
+                                logger.info(f"Updated StrategyState: {symbol} (Strategy ID: {strategy_id}, Size: {signed_size}, Entry: {fill_px})")
+                        
+                    logger.info(f"Successfully entered position for {symbol} on account '{acc_name}'. Order ID: {order_res.get('id')}")
+                    account_result.update({"success": True, "response": res})
+                else:
+                    logger.error(f"Failed to place order on account '{acc_name}': {res}")
+                    account_result.update({"success": False, "message": "Delta API Order Placement Failed", "details": res})
+
+        except Exception as acc_e:
+            logger.exception(f"Exception processing webhook in background for account '{acc_name}': {acc_e}")
+            account_result.update({"success": False, "message": "Internal processing exception", "error": str(acc_e)})
+            
+        results.append(account_result)
+        
+    # Logging results to database (short context)
+    status = "success"
+    details_list = []
+    success_count = sum(1 for r in results if r["success"])
+    
+    if len(results) == 0:
+        status = "failed"
+        details_list.append("No active accounts to execute.")
+    elif success_count == len(results):
+        status = "success"
+    elif success_count == 0:
+        status = "failed"
+    else:
+        status = "partial"
+        
+    for r in results:
+        name = r["name"]
+        if r["success"]:
+            msg = r.get("message") or "Order placed successfully"
+            order_id = r.get("response", {}).get("result", {}).get("id")
+            if order_id:
+                details_list.append(f"{name}: Success (Order ID: {order_id})")
+            else:
+                details_list.append(f"{name}: Success ({msg})")
+        else:
+            msg = r.get("message") or r.get("error") or "Unknown error"
+            details_list.append(f"{name}: Failed ({msg})")
+            
+    details_str = "\n".join(details_list)
+    with app.app_context():
         log_entry = TradeLog(
             ticker=ticker,
             action=action,
@@ -2406,21 +2452,21 @@ def execute_trades_background(accounts_data, ticker, action, source="webhook", p
         )
         db.session.add(log_entry)
         db.session.commit()
-        logger.info(f"Saved TradeLog entry to database. Status: {status}")
-        
-        # Send Notification
-        title_emoji = "🟢" if status == "success" else ("🟡" if status == "partial" else "🔴")
-        title = f"{title_emoji} Trade Alert: {ticker} ({action.upper()})"
-        notification_message = (
-            f"<b>Source:</b> {source}\n"
-            f"<b>Status:</b> {status.upper()}\n\n"
-            f"<b>Details:</b>\n<pre>{details_str}</pre>"
-        )
-        status_color = 1096065 if status == "success" else (16498468 if status == "partial" else 15680580)
-        send_notification(title, notification_message, status_color)
-                
-        logger.info("Background trade execution completed.")
-        return results
+    logger.info(f"Saved TradeLog entry to database. Status: {status}")
+    
+    # Send Notification
+    title_emoji = "🟢" if status == "success" else ("🟡" if status == "partial" else "🔴")
+    title = f"{title_emoji} Trade Alert: {ticker} ({action.upper()})"
+    notification_message = (
+        f"<b>Source:</b> {source}\n"
+        f"<b>Status:</b> {status.upper()}\n\n"
+        f"<b>Details:</b>\n<pre>{details_str}</pre>"
+    )
+    status_color = 1096065 if status == "success" else (16498468 if status == "partial" else 15680580)
+    send_notification(title, notification_message, status_color)
+    
+    logger.info("Background trade execution completed.")
+    return results
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
