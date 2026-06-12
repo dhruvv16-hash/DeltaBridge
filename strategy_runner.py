@@ -484,8 +484,18 @@ def strategy_runner_loop(app):
     """Main strategy daemon loop that executes every 10 seconds for active accounts."""
     logger.info("Local Python Strategy Runner Thread started.")
     
+    cycle_count = 0
     while True:
         try:
+            # Periodically verify API connectivity (every 60 seconds)
+            if cycle_count % 6 == 0:
+                try:
+                    from app import verify_api_connectivity
+                    verify_api_connectivity()
+                except Exception as conn_e:
+                    logger.error(f"Failed to check API connectivity: {conn_e}")
+            cycle_count += 1
+
             accounts_data = []
             with app.app_context():
                 # Fetch active accounts with strategy enabled

@@ -130,6 +130,134 @@ def send_notification(title, message, status_color=3447003):
         results["error"] = str(e)
     return results
 
+# Track the global online status of Delta Exchange API
+last_api_status = {"online": True, "last_alert_time": 0}
+
+def send_email_alert(subject, html_body):
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    # Ensure this doesn't run during testing to avoid making external requests
+    if os.getenv("FLASK_ENV") == "testing":
+        return True
+
+    try:
+        enabled = GlobalSetting.query.filter_by(key="email_enabled").first()
+        if not enabled or enabled.value.lower() != "true":
+            logger.info("Email alerts not enabled globally.")
+            return False
+
+        email_address_s = GlobalSetting.query.filter_by(key="email_address").first()
+        email_password_s = GlobalSetting.query.filter_by(key="email_password").first()
+        imap_host_s = GlobalSetting.query.filter_by(key="imap_host").first()
+
+        if not email_address_s or not email_address_s.value or not email_password_s or not email_password_s.value:
+            logger.warning("Email address or password not configured. Cannot send email alert.")
+            return False
+
+        email_address = email_address_s.value
+        email_password = email_password_s.value
+        imap_host = imap_host_s.value if imap_host_s else "imap.gmail.com"
+
+        # Determine SMTP Host
+        smtp_host = "smtp.gmail.com"
+        smtp_port = 587
+        
+        host_lower = imap_host.lower()
+        if "gmail" in host_lower:
+            smtp_host = "smtp.gmail.com"
+            smtp_port = 587
+        elif "outlook" in host_lower or "office365" in host_lower or "live.com" in host_lower:
+            smtp_host = "smtp.office365.com"
+            smtp_port = 587
+        elif "yahoo" in host_lower:
+            smtp_host = "smtp.mail.yahoo.com"
+            smtp_port = 465
+        else:
+            smtp_host = imap_host.replace("imap", "smtp")
+            smtp_port = 587
+
+        msg = MIMEMultipart()
+        msg["From"] = email_address
+        msg["To"] = email_address
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html_body, "html"))
+
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+            server.starttls()
+
+        server.login(email_address, email_password)
+        server.sendmail(email_address, email_address, msg.as_string())
+        server.quit()
+        logger.info(f"Successfully sent email alert: {subject}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send email alert: {e}")
+        return False
+
+def verify_api_connectivity():
+    """
+    Pings Delta Exchange public endpoint to verify connectivity.
+    If the API transitions to offline state, sends an email alert to the user.
+    """
+    global last_api_status
+    import requests
+    import time
+
+    if os.getenv("FLASK_ENV") == "testing":
+        return True
+
+    base_url = Config.BASE_URL
+    url = f"{base_url}/v2/products"
+
+    online = False
+    error_msg = ""
+    try:
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            online = True
+        else:
+            error_msg = f"HTTP status code {res.status_code} - {res.text}"
+    except Exception as e:
+        error_msg = str(e)
+
+    now = time.time()
+    if not online:
+        logger.warning(f"Delta Exchange API connectivity check failed: {error_msg}")
+        if last_api_status["online"] or (now - last_api_status["last_alert_time"] > 3600):
+            last_api_status["online"] = False
+            last_api_status["last_alert_time"] = now
+            
+            subject = "⚠️ Alert: Delta Exchange API is OFFLINE / Unresponsive"
+            body = f"""
+            <h3>Delta Exchange API Connectivity Alert</h3>
+            <p>The Trading Bot detected that the Delta Exchange API at <b>{base_url}</b> is offline or unresponsive.</p>
+            <p><b>Error Details:</b></p>
+            <pre style="background: #f4f4f4; padding: 1rem; border-radius: 4px;">{error_msg}</pre>
+            <p>The bot will automatically retry connecting in the background. Webhook signals and local strategies may fail to execute while the exchange is offline.</p>
+            <hr>
+            <p>Sent by Delta Bot Admin</p>
+            """
+            send_email_alert(subject, body)
+    else:
+        if not last_api_status["online"]:
+            logger.info("Delta Exchange API connection restored.")
+            last_api_status["online"] = True
+            
+            subject = "🟢 Resolved: Delta Exchange API is back ONLINE"
+            body = f"""
+            <h3>Delta Exchange API Restored</h3>
+            <p>The connection to Delta Exchange API at <b>{base_url}</b> has been successfully restored. All systems are operating normally.</p>
+            <hr>
+            <p>Sent by Delta Bot Admin</p>
+            """
+            send_email_alert(subject, body)
+
+    return online
 
 # ----------------- EMAIL DOUBLE-VERIFICATION INTEGRATION -----------------
 
