@@ -782,6 +782,11 @@
                             </select>
                         </div>
                         
+                        <div class="form-group">
+                            <label for="play-strategy">Strategy Name (Optional)</label>
+                            <input type="text" id="play-strategy" oninput="generatePlayload()" placeholder="e.g. Breakout Strategy" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.9rem;">
+                        </div>
+                        
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
                             <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Override Account Sizing (Custom Qty)</span>
                             <label class="switch">
@@ -971,9 +976,21 @@
                 
                 listContainer.innerHTML = '';
                 accounts.forEach(acc => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'account-card-container';
+                    wrapper.style.border = '1px solid var(--border-color)';
+                    wrapper.style.borderRadius = '12px';
+                    wrapper.style.overflow = 'hidden';
+                    wrapper.style.backgroundColor = 'rgba(255, 255, 255, 0.01)';
+                    wrapper.style.display = 'flex';
+                    wrapper.style.flexDirection = 'column';
+
                     const row = document.createElement('div');
                     row.className = 'account-row';
                     row.id = `row-${acc.id}`;
+                    row.style.border = 'none';
+                    row.style.borderRadius = '0';
+                    row.style.backgroundColor = 'transparent';
                     
                     const sizingLabel = acc.sizing_type === 'fixed' ? 'Fixed Margin' : 'Allocation';
                     const sizingValue = acc.sizing_type === 'fixed' ? `$${acc.fixed_amount.toFixed(2)}` : `${acc.balance_buffer_pct}%`;
@@ -1020,7 +1037,40 @@
                             <button class="btn btn-danger btn-sm" onclick="deleteAccount(${acc.id})">Delete</button>
                         </div>
                     `;
-                    listContainer.appendChild(row);
+                    
+                    wrapper.appendChild(row);
+
+                    // Append strategies toggle bar
+                    const toggleBar = document.createElement('div');
+                    toggleBar.style.padding = '0.6rem 1.5rem';
+                    toggleBar.style.backgroundColor = 'rgba(255, 255, 255, 0.015)';
+                    toggleBar.style.borderTop = '1px dashed var(--border-color)';
+                    toggleBar.style.display = 'flex';
+                    toggleBar.style.justifyContent = 'space-between';
+                    toggleBar.style.alignItems = 'center';
+                    toggleBar.style.fontSize = '0.85rem';
+                    
+                    toggleBar.innerHTML = `
+                        <a href="javascript:void(0)" onclick="toggleStrategiesPanel(${acc.id})" style="color: var(--primary); font-weight: 600; text-decoration: none; display: flex; align-items: center; gap: 0.35rem;">
+                            <span id="strategies-toggle-icon-${acc.id}">▶</span> Strategies (click to expand)
+                        </a>
+                        <span style="color: var(--text-secondary); font-size: 0.8rem;" id="strategies-count-${acc.id}">Loading...</span>
+                    `;
+                    wrapper.appendChild(toggleBar);
+                    
+                    // Append strategies panel
+                    const stratPanel = document.createElement('div');
+                    stratPanel.id = `strategies-panel-${acc.id}`;
+                    stratPanel.style.display = 'none';
+                    stratPanel.style.padding = '1.25rem 1.5rem';
+                    stratPanel.style.backgroundColor = 'rgba(0, 0, 0, 0.15)';
+                    stratPanel.style.borderTop = '1px solid var(--border-color)';
+                    
+                    wrapper.appendChild(stratPanel);
+                    listContainer.appendChild(wrapper);
+
+                    // Fetch count initially in background
+                    fetchStrategyCountOnly(acc.id);
                 });
                 updateAccountFilterDropdown(accounts);
             } catch (err) {
@@ -1029,7 +1079,316 @@
             }
         }
 
-        // Helper to update the Closed Position History account filter dropdown options dynamically
+        // Fetch strategy count only (used to show on the collapsed toggle bar)
+        async function fetchStrategyCountOnly(accId) {
+            try {
+                const response = await fetch(`/api/accounts/${accId}/strategies`);
+                const strategies = await response.json();
+                const countSpan = document.getElementById(`strategies-count-${accId}`);
+                if (countSpan) {
+                    countSpan.textContent = `${strategies.length} / 10 Configured`;
+                }
+            } catch (err) {
+                console.error(`Failed to load strategy count for account ${accId}:`, err);
+                const countSpan = document.getElementById(`strategies-count-${accId}`);
+                if (countSpan) countSpan.textContent = '--';
+            }
+        }
+
+        // Toggle strategies panel visibility
+        function toggleStrategiesPanel(accId) {
+            const panel = document.getElementById(`strategies-panel-${accId}`);
+            const icon = document.getElementById(`strategies-toggle-icon-${accId}`);
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                icon.textContent = '▼';
+                fetchStrategies(accId);
+            } else {
+                panel.style.display = 'none';
+                icon.textContent = '▶';
+            }
+        }
+
+        // Fetch strategies and render panel
+        async function fetchStrategies(accId) {
+            const panel = document.getElementById(`strategies-panel-${accId}`);
+            try {
+                panel.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 1rem;">Loading strategies...</div>`;
+                const response = await fetch(`/api/accounts/${accId}/strategies`);
+                const strategies = await response.json();
+                
+                // Update count in toggle bar
+                const countSpan = document.getElementById(`strategies-count-${accId}`);
+                if (countSpan) {
+                    countSpan.textContent = `${strategies.length} / 10 Configured`;
+                }
+                
+                renderStrategiesPanel(accId, strategies);
+            } catch (err) {
+                console.error("Failed to load strategies:", err);
+                panel.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 1rem;">Failed to load strategies.</div>`;
+            }
+        }
+
+        // Render strategy list inside the panel
+        function renderStrategiesPanel(accId, strategies) {
+            const panel = document.getElementById(`strategies-panel-${accId}`);
+            if (!panel) return;
+            
+            let strategiesListHtml = '';
+            if (strategies.length === 0) {
+                strategiesListHtml = `
+                    <div style="text-align: center; color: var(--text-secondary); padding: 1.5rem; border: 1px dashed var(--border-color); border-radius: 8px;">
+                        No strategies configured. Create a strategy below to allocate capital.
+                    </div>
+                `;
+            } else {
+                strategiesListHtml = `
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 0.85rem;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border-color); text-align: left; color: var(--text-secondary);">
+                                <th style="padding: 0.5rem 0.25rem;">Name</th>
+                                <th style="padding: 0.5rem 0.25rem;">Sizing Mode</th>
+                                <th style="padding: 0.5rem 0.25rem;">Size Value</th>
+                                <th style="padding: 0.5rem 0.25rem;">Leverage</th>
+                                <th style="padding: 0.5rem 0.25rem;">Virtual Position</th>
+                                <th style="padding: 0.5rem 0.25rem; text-align: center;">Active</th>
+                                <th style="padding: 0.5rem 0.25rem; text-align: right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${strategies.map(strat => {
+                                const isFixed = strat.sizing_type === 'fixed';
+                                const sizingVal = isFixed ? `$${strat.fixed_amount.toFixed(2)}` : `${strat.balance_buffer_pct}%`;
+                                
+                                // Parse virtual positions
+                                let posHtml = '<span style="color: var(--text-secondary);">Flat</span>';
+                                if (strat.positions && strat.positions.length > 0) {
+                                    const pos = strat.positions[0];
+                                    const side = pos.position_size > 0 ? 'LONG' : 'SHORT';
+                                    const sideColor = pos.position_size > 0 ? 'var(--success)' : 'var(--danger)';
+                                    const entryPx = pos.entry_price ? `$${pos.entry_price.toFixed(2)}` : '--';
+                                    posHtml = `<b style="color: ${sideColor};">${side}</b> ${Math.abs(pos.position_size)} Lots @ ${entryPx}`;
+                                }
+                                
+                                return `
+                                    <tr id="strat-row-${strat.id}" style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                        <td style="padding: 0.75rem 0.25rem; font-weight: 600;">${strat.name}</td>
+                                        <td style="padding: 0.75rem 0.25rem; text-transform: capitalize;">${strat.sizing_type}</td>
+                                        <td style="padding: 0.75rem 0.25rem; font-weight: 500;">${sizingVal}</td>
+                                        <td style="padding: 0.75rem 0.25rem;">${strat.leverage}x</td>
+                                        <td style="padding: 0.75rem 0.25rem;">${posHtml}</td>
+                                        <td style="padding: 0.75rem 0.25rem; text-align: center;">
+                                            <label class="switch" style="transform: scale(0.85); display: inline-block;">
+                                                <input type="checkbox" ${strat.is_active ? 'checked' : ''} onchange="toggleStrategyStatus(${accId}, ${strat.id}, this.checked)">
+                                                <span class="slider"></span>
+                                            </label>
+                                        </td>
+                                        <td style="padding: 0.75rem 0.25rem; text-align: right;">
+                                            <button class="btn btn-secondary btn-sm" style="padding: 0.2rem 0.4rem; font-size: 0.75rem;" onclick="editStrategyInline(${accId}, ${strat.id}, '${strat.name}', '${strat.sizing_type}', ${strat.balance_buffer_pct}, ${strat.fixed_amount}, ${strat.leverage})">Edit</button>
+                                            <button class="btn btn-danger btn-sm" style="padding: 0.2rem 0.4rem; font-size: 0.75rem;" onclick="deleteStrategy(${accId}, ${strat.id})">Delete</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+            
+            const limitReached = strategies.length >= 10;
+            const addBtnDisabled = limitReached ? 'disabled style="opacity: 0.5; cursor: not-allowed;" title="Maximum of 10 strategies limit reached"' : '';
+            
+            panel.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h4 style="margin: 0; font-family: 'Outfit', sans-serif; font-weight: 600; color: var(--primary);">Managed Strategies (Max 10)</h4>
+                    <button class="btn btn-primary btn-sm" onclick="showAddStrategyForm(${accId})" ${addBtnDisabled}>Add Strategy</button>
+                </div>
+                
+                <div id="strategies-list-${accId}">
+                    ${strategiesListHtml}
+                </div>
+                
+                <div id="strategy-form-container-${accId}" style="display: none; margin-top: 1rem; padding: 1rem; border: 1px solid var(--border-color); border-radius: 8px; background-color: rgba(255,255,255,0.02);">
+                    <!-- Add/Edit Strategy Form loaded dynamically -->
+                </div>
+            `;
+        }
+
+        // Show add strategy form
+        function showAddStrategyForm(accId) {
+            const formContainer = document.getElementById(`strategy-form-container-${accId}`);
+            formContainer.style.display = 'block';
+            formContainer.innerHTML = `
+                <h5 style="margin-top: 0; margin-bottom: 0.75rem; font-family: 'Outfit', sans-serif;">Add New Strategy</h5>
+                <form id="add-strat-form-${accId}" onsubmit="submitStrategy(event, ${accId})">
+                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;">
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0.5rem;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Strategy Name</label>
+                            <input type="text" id="strat-name-${accId}" required placeholder="e.g. Breakout Strategy" style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div class="form-group" style="width: 110px; margin-bottom: 0.5rem;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Sizing Mode</label>
+                            <select id="strat-sizing-type-${accId}" onchange="toggleStratFormSizing(${accId}, this.value)" style="padding: 0.4rem; font-size: 0.85rem; width: 100%; background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+                                <option value="percentage">Percentage</option>
+                                <option value="fixed">Fixed Amount</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="strat-buffer-group-${accId}" style="width: 90px; margin-bottom: 0.5rem;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Allocation %</label>
+                            <input type="number" id="strat-buffer-${accId}" min="1" max="100" value="10" required style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div class="form-group" id="strat-fixed-group-${accId}" style="width: 90px; margin-bottom: 0.5rem; display: none;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Margin Size</label>
+                            <input type="number" id="strat-fixed-amount-${accId}" min="0.001" step="any" value="10.0" style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div class="form-group" style="width: 80px; margin-bottom: 0.5rem;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Leverage</label>
+                            <input type="number" id="strat-leverage-${accId}" min="1" max="100" value="50" required style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="hideStrategyForm(${accId})">Cancel</button>
+                        </div>
+                    </div>
+                </form>
+            `;
+        }
+
+        // Show edit strategy form
+        function editStrategyInline(accId, stratId, name, sizingType, buffer, fixedAmount, leverage) {
+            const formContainer = document.getElementById(`strategy-form-container-${accId}`);
+            formContainer.style.display = 'block';
+            const isFixed = sizingType === 'fixed';
+            
+            formContainer.innerHTML = `
+                <h5 style="margin-top: 0; margin-bottom: 0.75rem; font-family: 'Outfit', sans-serif;">Edit Strategy: ${name}</h5>
+                <form id="edit-strat-form-${accId}" onsubmit="submitStrategy(event, ${accId}, ${stratId})">
+                    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;">
+                        <div class="form-group" style="flex: 1; min-width: 150px; margin-bottom: 0.5rem;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Strategy Name</label>
+                            <input type="text" id="strat-name-${accId}" required value="${name}" style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div class="form-group" style="width: 110px; margin-bottom: 0.5rem;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Sizing Mode</label>
+                            <select id="strat-sizing-type-${accId}" onchange="toggleStratFormSizing(${accId}, this.value)" style="padding: 0.4rem; font-size: 0.85rem; width: 100%; background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+                                <option value="percentage" ${sizingType === 'percentage' ? 'selected' : ''}>Percentage</option>
+                                <option value="fixed" ${sizingType === 'fixed' ? 'selected' : ''}>Fixed Amount</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="strat-buffer-group-${accId}" style="width: 90px; margin-bottom: 0.5rem; display: ${isFixed ? 'none' : 'block'};">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Allocation %</label>
+                            <input type="number" id="strat-buffer-${accId}" min="1" max="100" value="${buffer}" required style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div class="form-group" id="strat-fixed-group-${accId}" style="width: 90px; margin-bottom: 0.5rem; display: ${isFixed ? 'block' : 'none'};">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Margin Size</label>
+                            <input type="number" id="strat-fixed-amount-${accId}" min="0.001" step="any" value="${fixedAmount}" style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div class="form-group" style="width: 80px; margin-bottom: 0.5rem;">
+                            <label style="font-size: 0.75rem; color: var(--text-secondary);">Leverage</label>
+                            <input type="number" id="strat-leverage-${accId}" min="1" max="100" value="${leverage}" required style="padding: 0.4rem; font-size: 0.85rem; width: 100%;">
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="hideStrategyForm(${accId})">Cancel</button>
+                        </div>
+                    </div>
+                </form>
+            `;
+        }
+
+        // Toggle strat form sizing inputs
+        function toggleStratFormSizing(accId, value) {
+            const isFixed = value === 'fixed';
+            document.getElementById(`strat-buffer-group-${accId}`).style.display = isFixed ? 'none' : 'block';
+            document.getElementById(`strat-fixed-group-${accId}`).style.display = isFixed ? 'block' : 'none';
+        }
+
+        // Hide strategy add/edit form
+        function hideStrategyForm(accId) {
+            document.getElementById(`strategy-form-container-${accId}`).style.display = 'none';
+        }
+
+        // Submit strategy creation/update to REST APIs
+        async function submitStrategy(event, accId, stratId = null) {
+            event.preventDefault();
+            const name = document.getElementById(`strat-name-${accId}`).value.trim();
+            const sizingType = document.getElementById(`strat-sizing-type-${accId}`).value;
+            const balanceBufferPct = parseFloat(document.getElementById(`strat-buffer-${accId}`).value);
+            const fixedAmountVal = document.getElementById(`strat-fixed-amount-${accId}`) ? document.getElementById(`strat-fixed-amount-${accId}`).value : "10.0";
+            const fixedAmount = parseFloat(fixedAmountVal);
+            const leverage = parseInt(document.getElementById(`strat-leverage-${accId}`).value);
+            
+            const url = stratId ? `/api/strategies/${stratId}` : `/api/accounts/${accId}/strategies`;
+            const method = stratId ? 'PUT' : 'POST';
+            
+            try {
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name,
+                        sizing_type: sizingType,
+                        balance_buffer_pct: balanceBufferPct,
+                        fixed_amount: fixedAmount,
+                        leverage
+                    })
+                });
+                const resData = await response.json();
+                if (response.ok || resData.status === 'success') {
+                    showToast(stratId ? "Strategy updated successfully" : "Strategy added successfully", true);
+                    hideStrategyForm(accId);
+                    fetchStrategies(accId);
+                } else {
+                    showToast(resData.message || "Failed to save strategy", false);
+                }
+            } catch (err) {
+                console.error("Failed to save strategy:", err);
+                showToast("Network error occurred", false);
+            }
+        }
+
+        // Toggle strategy active/inactive status
+        async function toggleStrategyStatus(accId, stratId, isActive) {
+            try {
+                const response = await fetch(`/api/strategies/${stratId}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: isActive })
+                });
+                const resData = await response.json();
+                if (response.ok || resData.status === 'success') {
+                    showToast(isActive ? "Strategy activated" : "Strategy deactivated", true);
+                } else {
+                    showToast(resData.message || "Failed to toggle strategy status", false);
+                    fetchStrategies(accId); // reset toggle visually
+                }
+            } catch (err) {
+                console.error("Failed to toggle strategy:", err);
+                showToast("Network error occurred", false);
+                fetchStrategies(accId); // reset toggle visually
+            }
+        }
+
+        // Delete strategy configuration
+        async function deleteStrategy(accId, stratId) {
+            if (!confirm("Are you sure you want to delete this strategy? This will also remove its virtual position tracking.")) return;
+            try {
+                const response = await fetch(`/api/strategies/${stratId}`, {
+                    method: 'DELETE'
+                });
+                const resData = await response.json();
+                if (response.ok || resData.status === 'success') {
+                    showToast("Strategy deleted successfully", true);
+                    fetchStrategies(accId);
+                } else {
+                    showToast(resData.message || "Failed to delete strategy", false);
+                }
+            } catch (err) {
+                console.error("Failed to delete strategy:", err);
+                showToast("Network error occurred", false);
+            }
+        }
         function updateAccountFilterDropdown(accounts) {
             const dropdown = document.getElementById('closed-positions-account-filter');
             if (!dropdown) return;
@@ -1647,6 +2006,9 @@
                 const netPnlColor = netPnlVal > 0 ? 'var(--success)' : (netPnlVal < 0 ? 'var(--danger)' : 'var(--text-primary)');
                 const netPnlPrefix = netPnlVal > 0 ? '+' : '';
                 
+                const feesText = feesVal > 0 ? `-$${feesVal.toFixed(4)}` : `$${feesVal.toFixed(4)}`;
+                const feesColor = feesVal > 0 ? 'var(--danger)' : 'var(--text-secondary)';
+                
                 const sideBadge = pos.side === 'LONG' ? 
                     `<span class="status-badge" style="background-color: rgba(16, 185, 129, 0.12); color: var(--success); text-transform: uppercase;">LONG</span>` :
                     `<span class="status-badge" style="background-color: rgba(239, 68, 68, 0.12); color: var(--danger); text-transform: uppercase;">SHORT</span>`;
@@ -1662,7 +2024,7 @@
                     <td style="padding: 1rem; font-weight: 500; color: ${pnlColor}; font-size: 0.9rem;">
                         ${pnlPrefix}${pnlVal.toFixed(4)}
                     </td>
-                    <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${feesVal.toFixed(4)}</td>
+                    <td style="padding: 1rem; color: ${feesColor}; font-size: 0.85rem;">${feesText}</td>
                     <td style="padding: 1rem; font-weight: 600; color: ${netPnlColor}; font-size: 0.9rem;">
                         ${netPnlPrefix}${netPnlVal.toFixed(4)}
                     </td>
@@ -1695,6 +2057,9 @@
             const netColor = totalNet > 0 ? 'var(--success)' : (totalNet < 0 ? 'var(--danger)' : 'var(--text-primary)');
             const netPrefix = totalNet > 0 ? '+' : '';
             
+            const totalFeesText = totalFees > 0 ? `-$${totalFees.toFixed(4)}` : `$${totalFees.toFixed(4)}`;
+            const totalFeesColor = totalFees > 0 ? 'var(--danger)' : 'var(--text-secondary)';
+            
             totalRow.innerHTML = `
                 <td style="padding: 1rem; color: var(--text-primary); font-weight: 700;">TOTAL</td>
                 <td style="padding: 1rem;"></td>
@@ -1706,7 +2071,7 @@
                 <td style="padding: 1rem; font-weight: 700; color: ${grossColor}; font-size: 0.9rem;">
                     ${grossPrefix}${totalGross.toFixed(4)}
                 </td>
-                <td style="padding: 1rem; color: var(--text-secondary); font-size: 0.85rem;">$${totalFees.toFixed(4)}</td>
+                <td style="padding: 1rem; color: ${totalFeesColor}; font-size: 0.85rem;">${totalFeesText}</td>
                 <td style="padding: 1rem; font-weight: 700; color: ${netColor}; font-size: 0.9rem;">
                     ${netPrefix}${totalNet.toFixed(4)}
                 </td>
@@ -1873,6 +2238,7 @@
             const action = document.getElementById('play-action').value;
             const override = document.getElementById('play-qty-override').checked;
             const qty = override ? parseFloat(document.getElementById('play-qty').value) : null;
+            const strategyVal = document.getElementById('play-strategy') ? document.getElementById('play-strategy').value.trim() : "";
             
             // We pull the passphrase from the Global settings field
             const passphrase = document.getElementById('passphrase').value || "my_secure_passphrase";
@@ -1882,6 +2248,10 @@
                 action: action,
                 passphrase: passphrase
             };
+
+            if (strategyVal) {
+                payload.strategy = strategyVal;
+            }
 
             if (override && qty !== null && !isNaN(qty)) {
                 payload.quantity = qty;
@@ -1909,6 +2279,7 @@
             const qty = override ? parseFloat(document.getElementById('play-qty').value) : null;
             const live = document.getElementById('play-live-execute').checked;
             const passphrase = document.getElementById('passphrase').value;
+            const strategyVal = document.getElementById('play-strategy') ? document.getElementById('play-strategy').value.trim() : "";
             
             if (!passphrase) {
                 showToast("Save/enter passphrase under Global Settings first!", false);
@@ -1921,6 +2292,10 @@
                 passphrase: passphrase,
                 live_execute: live
             };
+
+            if (strategyVal) {
+                payload.strategy = strategyVal;
+            }
 
             if (override && qty !== null && !isNaN(qty)) {
                 payload.quantity = qty;

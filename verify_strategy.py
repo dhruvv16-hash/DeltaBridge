@@ -11,7 +11,7 @@ os.environ["FLASK_ENV"] = "testing"
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from app import app, db
-from models import Account, StrategyState, TradeLog
+from models import Account, StrategyState, TradeLog, Strategy
 from delta_client import DeltaClient
 from strategy_logic import (
     compute_atr,
@@ -350,6 +350,263 @@ class TestStrategyRunner(unittest.TestCase):
         # Stop Loss should close the remaining position size (which is 100 contracts on exchange)
         mock_place.assert_called_once_with(176, size=100, side="sell", order_type="market_order", reduce_only=True)
         self.assertEqual(state.position_size, 0.0)
+
+class TestMultiStrategyAllocation(unittest.TestCase):
+    def setUp(self):
+        self.app_context = app.app_context()
+        self.app_context.push()
+        
+        db.session.rollback()
+        db.session.close()
+        db.session.expunge_all()
+        db.drop_all()
+        db.create_all()
+        
+        # Add a test account
+        self.account = Account(
+            name="Test Account 1",
+            api_key="test_key_1",
+            api_secret="test_secret_1",
+            leverage=50,
+            balance_buffer_pct=50.0,
+            is_active=True
+        )
+        db.session.add(self.account)
+        db.session.commit()
+        
+        # Add default passphrase setting
+        from models import GlobalSetting
+        db.session.add(GlobalSetting(key="passphrase", value="test_passphrase"))
+        db.session.commit()
+        
+        self.app = app.test_client()
+
+        # Mock public delta client get_product_by_symbol
+        from app import public_delta_client
+        self.orig_get_product = public_delta_client.get_product_by_symbol
+        public_delta_client.get_product_by_symbol = MagicMock(
+            return_value={"symbol": "ETHUSD.P", "id": 27, "contract_value": "0.01"}
+        )
+
+    def tearDown(self):
+        from app import public_delta_client
+        public_delta_client.get_product_by_symbol = self.orig_get_product
+        db.session.rollback()
+        db.session.close()
+        db.session.expunge_all()
+        db.drop_all()
+        self.app_context.pop()
+
+    def test_strategy_crud_and_limits(self):
+        # 1. Create strategy successfully
+        resp = self.app.post(f"/api/accounts/{self.account.id}/strategies", json={
+            "name": "Strategy A",
+            "sizing_type": "percentage",
+            "balance_buffer_pct": 15.0,
+            "leverage": 20
+        })
+        self.assertEqual(resp.status_code, 201)
+        data = resp.get_json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["strategy"]["name"], "Strategy A")
+        self.assertEqual(data["strategy"]["balance_buffer_pct"], 15.0)
+        self.assertEqual(data["strategy"]["leverage"], 20)
+
+        # 2. Prevent duplicate strategy name per account
+        resp_dup = self.app.post(f"/api/accounts/{self.account.id}/strategies", json={
+            "name": "strategy a", # case-insensitive test
+            "sizing_type": "fixed",
+            "fixed_amount": 10.0
+        })
+        self.assertEqual(resp_dup.status_code, 400)
+        self.assertIn("already exists", resp_dup.get_json()["message"])
+
+        # 3. Create up to 10 strategies successfully
+        for i in range(2, 11):
+            resp_i = self.app.post(f"/api/accounts/{self.account.id}/strategies", json={
+                "name": f"Strategy {i}"
+            })
+            self.assertEqual(resp_i.status_code, 201)
+
+        # Attempt 11th strategy (should fail)
+        resp_11 = self.app.post(f"/api/accounts/{self.account.id}/strategies", json={
+            "name": "Strategy 11"
+        })
+        self.assertEqual(resp_11.status_code, 400)
+        self.assertIn("Maximum of 10 strategies limit reached", resp_11.get_json()["message"])
+
+        # 4. Update strategy details
+        strategy = Strategy.query.filter_by(account_id=self.account.id, name="Strategy A").first()
+        resp_update = self.app.put(f"/api/strategies/{strategy.id}", json={
+            "sizing_type": "fixed",
+            "fixed_amount": 25.0,
+            "leverage": 10
+        })
+        self.assertEqual(resp_update.status_code, 200)
+        db.session.refresh(strategy)
+        self.assertEqual(strategy.sizing_type, "fixed")
+        self.assertEqual(strategy.fixed_amount, 25.0)
+        self.assertEqual(strategy.leverage, 10)
+
+        # 5. Toggle strategy status
+        resp_toggle = self.app.post(f"/api/strategies/{strategy.id}/toggle", json={"is_active": False})
+        self.assertEqual(resp_toggle.status_code, 200)
+        self.assertFalse(resp_toggle.get_json()["is_active"])
+
+        # 6. Delete strategy config and verify cascade delete of StrategyState
+        state = StrategyState(account_id=self.account.id, symbol="ETHUSD.P", strategy_id=strategy.id, position_size=10.0)
+        db.session.add(state)
+        db.session.commit()
+        
+        resp_del = self.app.delete(f"/api/strategies/{strategy.id}")
+        self.assertEqual(resp_del.status_code, 200)
+        self.assertIsNone(Strategy.query.get(strategy.id))
+        self.assertIsNone(StrategyState.query.filter_by(strategy_id=strategy.id).first())
+
+    @patch('app.DeltaClient')
+    def test_webhook_strategy_execution_and_sizing(self, mock_client_class):
+        mock_client = mock_client_class.return_value
+        # Mock available balance and tickers
+        mock_client.get_available_balance.return_value = (100.0, "USDT")
+        mock_client.get_ticker.return_value = {"mark_price": "2000.0", "last_price": "2000.0"}
+        mock_client.place_order.return_value = {"success": True, "result": {"id": "ord_123", "average_fill_price": "2000.0"}}
+        mock_client.get_position.return_value = None
+
+        # Configure Strategy A (percentage-sizing)
+        strat_a = Strategy(
+            account_id=self.account.id,
+            name="Strategy A",
+            sizing_type="percentage",
+            balance_buffer_pct=10.0, # 10% of 100 USDT balance = 10 USDT allocated
+            leverage=50, # buying power = 500 USDT
+            is_active=True
+        )
+        # Configure Strategy B (fixed-sizing)
+        strat_b = Strategy(
+            account_id=self.account.id,
+            name="Strategy B",
+            sizing_type="fixed",
+            fixed_amount=20.0, # 20 USDT allocated margin
+            leverage=20, # buying power = 400 USDT
+            is_active=True
+        )
+        db.session.add_all([strat_a, strat_b])
+        db.session.commit()
+
+        # Send Webhook Alert targeting Strategy A (buy)
+        # Contract size is 0.01. Eth price is 2000. Lot value is 20 USDT.
+        # Strategy A buying power = 100 USDT * 50x * 10% = 500 USDT.
+        # Expected size in lots = floor(500 / 20) = 25 lots.
+        payload_a = {
+            "ticker": "ETHUSD.P",
+            "action": "buy",
+            "passphrase": "test_passphrase",
+            "strategy": "Strategy A"
+        }
+        resp = self.app.post("/webhook", json=payload_a)
+        self.assertEqual(resp.status_code, 200)
+        
+        # Verify order placed with correct size and reduce_only=False
+        mock_client.place_order.assert_called_with(
+            product_id=27,
+            size=25,
+            side="buy",
+            order_type="market_order",
+            reduce_only=False
+        )
+
+        # Verify StrategyState is updated independently for Strategy A
+        state_a = StrategyState.query.filter_by(account_id=self.account.id, strategy_id=strat_a.id).first()
+        self.assertIsNotNone(state_a)
+        self.assertEqual(state_a.position_size, 25)
+        self.assertEqual(state_a.entry_price, 2000.0)
+
+        # Reset mock
+        mock_client.place_order.reset_mock()
+
+        # Send Webhook Alert targeting Strategy B (sell/short)
+        # Strategy B buying power = 20 USDT * 20x = 400 USDT.
+        # Expected size in lots = floor(400 / 20) = 20 lots.
+        payload_b = {
+            "ticker": "ETHUSD.P",
+            "action": "sell",
+            "passphrase": "test_passphrase",
+            "strategy": "Strategy B"
+        }
+        resp_b = self.app.post("/webhook", json=payload_b)
+        self.assertEqual(resp_b.status_code, 200)
+
+        # Verify order placed with correct size and reduce_only=False
+        mock_client.place_order.assert_called_with(
+            product_id=27,
+            size=20,
+            side="sell",
+            order_type="market_order",
+            reduce_only=False
+        )
+
+        # Verify StrategyState is updated independently for Strategy B
+        state_b = StrategyState.query.filter_by(account_id=self.account.id, strategy_id=strat_b.id).first()
+        self.assertIsNotNone(state_b)
+        self.assertEqual(state_b.position_size, -20) # negative for short
+        self.assertEqual(state_b.entry_price, 2000.0)
+
+        # Reset mock
+        mock_client.place_order.reset_mock()
+
+        # Test Strategy Reversal
+        # Strategy A is LONG 25 lots. Sending a "sell" (reversal) webhook should close the LONG first (25 lots) and then enter SHORT.
+        payload_a_rev = {
+            "ticker": "ETHUSD.P",
+            "action": "sell",
+            "passphrase": "test_passphrase",
+            "strategy": "Strategy A"
+        }
+        # In reversal, first close_res is called to close the LONG position (size=25, side=sell, reduce_only=False)
+        # Then enters SHORT (size=25, side=sell, reduce_only=False)
+        resp_rev = self.app.post("/webhook", json=payload_a_rev)
+        self.assertEqual(resp_rev.status_code, 200)
+
+        # Assert two calls: close (sell 25 lots) and entry (sell 25 lots)
+        self.assertEqual(mock_client.place_order.call_count, 2)
+        mock_client.place_order.assert_any_call(
+            product_id=27,
+            size=25,
+            side="sell",
+            order_type="market_order",
+            reduce_only=False
+        )
+
+        # Check final virtual position of Strategy A is now SHORT 25 lots
+        db.session.refresh(state_a)
+        self.assertEqual(state_a.position_size, -25)
+
+        # Reset mock
+        mock_client.place_order.reset_mock()
+
+        # Test Strategy Close action
+        payload_a_close = {
+            "ticker": "ETHUSD.P",
+            "action": "close_short",
+            "passphrase": "test_passphrase",
+            "strategy": "Strategy A"
+        }
+        resp_close = self.app.post("/webhook", json=payload_a_close)
+        self.assertEqual(resp_close.status_code, 200)
+
+        # Assert it places a buy order of 25 lots with reduce_only=False
+        mock_client.place_order.assert_called_once_with(
+            product_id=27,
+            size=25,
+            side="buy",
+            order_type="market_order",
+            reduce_only=False
+        )
+
+        # Assert StrategyState is reset
+        db.session.refresh(state_a)
+        self.assertEqual(state_a.position_size, 0.0)
+        self.assertIsNone(state_a.entry_price)
 
 if __name__ == "__main__":
     unittest.main()

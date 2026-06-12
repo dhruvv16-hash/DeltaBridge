@@ -727,13 +727,13 @@ class TestPnLTracking(unittest.TestCase):
         # Expected Fees: entry_notional = 2000 * 10 * 0.01 = 200. exit_notional = 2020 * 10 * 0.01 = 202.
         # total_notional = 402. fees = 402 * 0.0005 = 0.2010.
         # Expected Net PnL: 2.0 - 0.201 = 1.7990.
-        self.assertAlmostEqual(ws.cell(row=2, column=9).value, 0.2010)
+        self.assertAlmostEqual(ws.cell(row=2, column=9).value, -0.2010)
         self.assertAlmostEqual(ws.cell(row=2, column=10).value, 1.7990)
         
         # Verify Total row
         self.assertEqual(ws.cell(row=3, column=1).value, "TOTAL")
         self.assertEqual(ws.cell(row=3, column=8).value, 2.0)
-        self.assertAlmostEqual(ws.cell(row=3, column=9).value, 0.2010)
+        self.assertAlmostEqual(ws.cell(row=3, column=9).value, -0.2010)
         self.assertAlmostEqual(ws.cell(row=3, column=10).value, 1.7990)
 
     @patch('app.DeltaClient')

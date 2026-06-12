@@ -62,11 +62,41 @@ class TradeLog(db.Model):
             "details": self.details
         }
 
+class Strategy(db.Model):
+    __tablename__ = 'strategies'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    sizing_type = db.Column(db.String(20), default="percentage", nullable=False) # "percentage" or "fixed"
+    balance_buffer_pct = db.Column(db.Float, default=10.0, nullable=False) # allocation size percentage (e.g. 10.0%)
+    fixed_amount = db.Column(db.Float, default=10.0, nullable=False) # fixed margin size (e.g. 10.0 USD)
+    leverage = db.Column(db.Integer, default=50, nullable=False)
+    
+    # Unique constraint so names are unique per account
+    __table_args__ = (
+        db.UniqueConstraint('account_id', 'name', name='uq_account_strategy_name'),
+    )
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "account_id": self.account_id,
+            "name": self.name,
+            "is_active": self.is_active,
+            "sizing_type": self.sizing_type,
+            "balance_buffer_pct": self.balance_buffer_pct,
+            "fixed_amount": self.fixed_amount,
+            "leverage": self.leverage
+        }
+
 class StrategyState(db.Model):
     __tablename__ = 'strategy_states'
     
     id = db.Column(db.Integer, primary_key=True)
     account_id = db.Column(db.Integer, db.ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False)
+    strategy_id = db.Column(db.Integer, db.ForeignKey('strategies.id', ondelete='CASCADE'), nullable=True)
     symbol = db.Column(db.String(50), nullable=False)
     position_size = db.Column(db.Float, default=0.0, nullable=False) # 0 if flat, positive for long, negative for short
     entry_price = db.Column(db.Float, nullable=True)
@@ -83,6 +113,7 @@ class StrategyState(db.Model):
         return {
             "id": self.id,
             "account_id": self.account_id,
+            "strategy_id": self.strategy_id,
             "symbol": self.symbol,
             "position_size": self.position_size,
             "entry_price": self.entry_price,

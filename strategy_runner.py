@@ -41,9 +41,9 @@ def run_strategy_for_account(app, account, client):
     tick_size = float(product.get("tick_size", 0.05))
     
     # 2. Get or create StrategyState record
-    state = StrategyState.query.filter_by(account_id=account.id, symbol=SYMBOL).first()
+    state = StrategyState.query.filter_by(account_id=account.id, symbol=SYMBOL, strategy_id=None).first()
     if not state:
-        state = StrategyState(account_id=account.id, symbol=SYMBOL, position_size=0.0)
+        state = StrategyState(account_id=account.id, symbol=SYMBOL, strategy_id=None, position_size=0.0)
         db.session.add(state)
         db.session.commit()
         
