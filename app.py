@@ -221,6 +221,7 @@ def email_polling_loop():
     import imaplib
     import email
     import time
+    import socket
     
     logger.info("Email polling background worker started.")
     while True:
@@ -228,33 +229,70 @@ def email_polling_loop():
             # Poll every 60 seconds
             time.sleep(60)
             
+            enabled = False
+            imap_host = ""
+            imap_port = 993
+            email_address = ""
+            email_password = ""
+            email_sender = "noreply@tradingview.com"
+            email_subject = "TradingView Alert"
+            accounts_data = []
+            
+            # 1. Fetch settings inside a short-lived DB context and release connection immediately
             with app.app_context():
                 enabled_setting = GlobalSetting.query.filter_by(key="email_enabled").first()
-                if not enabled_setting or enabled_setting.value != "true":
-                    continue
+                if enabled_setting and enabled_setting.value == "true":
+                    enabled = True
+                    imap_host_s = GlobalSetting.query.filter_by(key="imap_host").first()
+                    imap_port_s = GlobalSetting.query.filter_by(key="imap_port").first()
+                    email_address_s = GlobalSetting.query.filter_by(key="email_address").first()
+                    email_password_s = GlobalSetting.query.filter_by(key="email_password").first()
+                    email_sender_s = GlobalSetting.query.filter_by(key="email_sender").first()
+                    email_subject_s = GlobalSetting.query.filter_by(key="email_subject").first()
                     
-                imap_host_s = GlobalSetting.query.filter_by(key="imap_host").first()
-                imap_port_s = GlobalSetting.query.filter_by(key="imap_port").first()
-                email_address_s = GlobalSetting.query.filter_by(key="email_address").first()
-                email_password_s = GlobalSetting.query.filter_by(key="email_password").first()
-                email_sender_s = GlobalSetting.query.filter_by(key="email_sender").first()
-                email_subject_s = GlobalSetting.query.filter_by(key="email_subject").first()
+                    imap_host = imap_host_s.value if imap_host_s else ""
+                    imap_port = int(imap_port_s.value) if imap_port_s else 993
+                    email_address = email_address_s.value if email_address_s else ""
+                    email_password = email_password_s.value if email_password_s else ""
+                    if email_sender_s:
+                        email_sender = email_sender_s.value
+                    if email_subject_s:
+                        email_subject = email_subject_s.value
+                        
+                    active_accounts = Account.query.filter_by(is_active=True).all()
+                    for account in active_accounts:
+                        accounts_data.append({
+                            "id": account.id,
+                            "name": account.name,
+                            "api_key": account.api_key,
+                            "api_secret": account.api_secret,
+                            "leverage": account.leverage,
+                            "balance_buffer_pct": account.balance_buffer_pct,
+                            "sizing_type": account.sizing_type,
+                            "fixed_amount": account.fixed_amount
+                        })
+                        
+                    if not accounts_data and Config.API_KEY and Config.API_SECRET:
+                        accounts_data = [{
+                            "id": 0,
+                            "name": "Environment Default",
+                            "api_key": Config.API_KEY,
+                            "api_secret": Config.API_SECRET,
+                            "leverage": Config.DEFAULT_LEVERAGE,
+                            "balance_buffer_pct": Config.BALANCE_BUFFER_PCT * 100.0
+                        }]
+            
+            if not enabled or not imap_host or not email_address or not email_password:
+                continue
                 
-                if not (imap_host_s and email_address_s and email_password_s):
-                    continue
-                    
-                imap_host = imap_host_s.value
-                imap_port = int(imap_port_s.value) if imap_port_s else 993
-                email_address = email_address_s.value
-                email_password = email_password_s.value
-                email_sender = email_sender_s.value if email_sender_s else "noreply@tradingview.com"
-                email_subject = email_subject_s.value if email_subject_s else "TradingView Alert"
-                
-                if not imap_host or not email_address or not email_password:
-                    continue
-                    
-                logger.info(f"Connecting to IMAP {imap_host}:{imap_port} for {email_address}...")
-                mail = imaplib.IMAP4_SSL(imap_host, imap_port, timeout=10)
+            # 2. Perform IMAP operations outside the database context
+            logger.info(f"Connecting to IMAP {imap_host}:{imap_port} for {email_address}...")
+            
+            # Set a global socket timeout of 15 seconds to prevent hanging indefinitely
+            original_timeout = socket.getdefaulttimeout()
+            socket.setdefaulttimeout(15)
+            try:
+                mail = imaplib.IMAP4_SSL(imap_host, imap_port)
                 mail.login(email_address, email_password)
                 mail.select("inbox")
                 
@@ -270,30 +308,6 @@ def email_polling_loop():
                     
                 logger.info(f"Detected {len(mail_ids)} unread emails. Reconciling signals...")
                 
-                active_accounts = Account.query.filter_by(is_active=True).all()
-                accounts_data = []
-                for account in active_accounts:
-                    accounts_data.append({
-                        "id": account.id,
-                        "name": account.name,
-                        "api_key": account.api_key,
-                        "api_secret": account.api_secret,
-                        "leverage": account.leverage,
-                        "balance_buffer_pct": account.balance_buffer_pct,
-                        "sizing_type": account.sizing_type,
-                        "fixed_amount": account.fixed_amount
-                    })
-                    
-                if not accounts_data and Config.API_KEY and Config.API_SECRET:
-                    accounts_data = [{
-                        "id": 0,
-                        "name": "Environment Default",
-                        "api_key": Config.API_KEY,
-                        "api_secret": Config.API_SECRET,
-                        "leverage": Config.DEFAULT_LEVERAGE,
-                        "balance_buffer_pct": Config.BALANCE_BUFFER_PCT * 100.0
-                    }]
-                    
                 for mail_id in mail_ids:
                     res, msg_data = mail.fetch(mail_id, '(RFC822)')
                     if res != "OK":
@@ -340,24 +354,27 @@ def email_polling_loop():
                                 logger.warning("No accounts available to check position for email signal.")
                                 continue
                                 
-                            has_match = check_position_matches_action(accounts_data[0], ticker, action)
-                            if has_match:
-                                logger.info(f"Double-Verification: Matching position for {ticker} ({action}) already exists. Skipping.")
-                                log_entry = TradeLog(
-                                    ticker=ticker,
-                                    action=action,
-                                    source="email_fallback",
-                                    status="verified",
-                                    details="Verified: Position already matches the signal on Delta Exchange."
-                                )
-                                db.session.add(log_entry)
-                                db.session.commit()
-                            else:
-                                logger.warning(f"Double-Verification FAILED: No active position matches {action} {ticker} on Delta. Executing fallback...")
-                                payload_data = {"quantity": quantity} if quantity is not None else None
-                                execute_trades_background(accounts_data, ticker, action, source="email_fallback", payload=payload_data)
-                                
+                            # Re-enter DB context only to perform database writes
+                            with app.app_context():
+                                has_match = check_position_matches_action(accounts_data[0], ticker, action)
+                                if has_match:
+                                    logger.info(f"Double-Verification: Matching position for {ticker} ({action}) already exists. Skipping.")
+                                    log_entry = TradeLog(
+                                        ticker=ticker,
+                                        action=action,
+                                        source="email_fallback",
+                                        status="verified",
+                                        details="Verified: Position already matches the signal on Delta Exchange."
+                                    )
+                                    db.session.add(log_entry)
+                                    db.session.commit()
+                                else:
+                                    logger.warning(f"Double-Verification FAILED: No active position matches {action} {ticker} on Delta. Executing fallback...")
+                                    payload_data = {"quantity": quantity} if quantity is not None else None
+                                    execute_trades_background(accounts_data, ticker, action, source="email_fallback", payload=payload_data)
                 mail.logout()
+            finally:
+                socket.setdefaulttimeout(original_timeout)
         except Exception as e:
             logger.exception(f"Error in email polling iteration: {e}")
 
