@@ -44,6 +44,20 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 
 db.init_app(app)
 
+_db_pool_initialized = False
+
+@app.before_request
+def initialize_db_connections():
+    global _db_pool_initialized
+    if not _db_pool_initialized:
+        try:
+            db_uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+            if "sqlite" not in db_uri:
+                db.engine.dispose()
+        except Exception as e:
+            logger.warning(f"Error disposing database engine pool on first request: {e}")
+        _db_pool_initialized = True
+
 
 # Initialize static Delta REST Client for public symbols lookup
 public_delta_client = DeltaClient(
@@ -2680,6 +2694,14 @@ if os.getenv("FLASK_ENV") != "testing":
         init_email_listener()
         # Spawn daemon thread for local strategy runner
         init_strategy_runner()
+        
+        # Dispose the engine pool so that Gunicorn workers do not inherit open connection sockets
+        try:
+            db_uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+            if "sqlite" not in db_uri:
+                db.engine.dispose()
+        except Exception as e:
+            logger.warning(f"Failed to dispose engine pool at startup: {e}")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
