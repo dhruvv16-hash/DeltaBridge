@@ -650,7 +650,8 @@ class TestPnLTracking(unittest.TestCase):
         response = self.app.get('/api/journal/export')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content_type, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        self.assertIn("attachment; filename=trading_journal.xlsx", response.headers["Content-Disposition"])
+        self.assertIn("attachment; filename=trading_journal", response.headers["Content-Disposition"])
+        self.assertTrue(response.headers["Content-Disposition"].endswith(".xlsx"))
         
         # Load Excel output
         import io
@@ -685,6 +686,21 @@ class TestPnLTracking(unittest.TestCase):
         self.assertEqual(ws.cell(row=3, column=8).value, "=SUM(H2:H2)")
         self.assertEqual(ws.cell(row=3, column=9).value, "=SUM(I2:I2)")
         self.assertEqual(ws.cell(row=3, column=10).value, "=SUM(J2:J2)")
+
+    @patch('app.DeltaClient')
+    @patch('app.public_delta_client')
+    def test_export_journal_account_specific(self, mock_public_client, mock_client_class):
+        """Test that the /api/journal/export endpoint filters by account_id."""
+        mock_public_client.get_products.return_value = [
+            {"id": 27, "symbol": "ETHUSD", "contract_value": "0.01"}
+        ]
+        mock_private_client = mock_client_class.return_value
+        mock_private_client.get_closed_positions.return_value = []
+        
+        # Test with account_id=0 (Environment default)
+        response = self.app.get('/api/journal/export?account_id=0')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment; filename=trading_journal_environment_default.xlsx", response.headers["Content-Disposition"])
 
 class TestSizingModels(unittest.TestCase):
     def setUp(self):

@@ -1062,21 +1062,49 @@ def export_journal():
     import io
     import datetime
     try:
-        active_accounts = Account.query.filter_by(is_active=True).all()
-        if not active_accounts:
-            if Config.API_KEY and Config.API_SECRET:
-                fallback_account = Account(
-                    id=0,
-                    name="Environment Default",
-                    api_key=Config.API_KEY,
-                    api_secret=Config.API_SECRET,
-                    leverage=Config.DEFAULT_LEVERAGE,
-                    balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
-                    sizing_type="percentage",
-                    fixed_amount=10.0,
-                    is_active=True
-                )
-                active_accounts = [fallback_account]
+        # Retrieve optional account_id query parameter
+        account_id_param = request.args.get("account_id")
+        
+        active_accounts = []
+        if account_id_param and account_id_param.lower() != "all":
+            try:
+                acc_id = int(account_id_param)
+                if acc_id == 0:
+                    if Config.API_KEY and Config.API_SECRET:
+                        fallback_account = Account(
+                            id=0,
+                            name="Environment Default",
+                            api_key=Config.API_KEY,
+                            api_secret=Config.API_SECRET,
+                            leverage=Config.DEFAULT_LEVERAGE,
+                            balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                            sizing_type="percentage",
+                            fixed_amount=10.0,
+                            is_active=True
+                        )
+                        active_accounts = [fallback_account]
+                else:
+                    target_acc = Account.query.get(acc_id)
+                    if target_acc:
+                        active_accounts = [target_acc]
+            except ValueError:
+                pass
+        else:
+            active_accounts = Account.query.filter_by(is_active=True).all()
+            if not active_accounts:
+                if Config.API_KEY and Config.API_SECRET:
+                    fallback_account = Account(
+                        id=0,
+                        name="Environment Default",
+                        api_key=Config.API_KEY,
+                        api_secret=Config.API_SECRET,
+                        leverage=Config.DEFAULT_LEVERAGE,
+                        balance_buffer_pct=Config.BALANCE_BUFFER_PCT * 100.0,
+                        sizing_type="percentage",
+                        fixed_amount=10.0,
+                        is_active=True
+                    )
+                    active_accounts = [fallback_account]
 
         products = []
         try:
@@ -1210,7 +1238,7 @@ def export_journal():
             ws.column_dimensions[col].width = width
 
         # Define Styles
-        font_header = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        font_header = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
         fill_header = PatternFill(fill_type="solid", fgColor="1A1A2E")
         align_center = Alignment(horizontal="center", vertical="center")
         align_header = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -1241,7 +1269,7 @@ def export_journal():
         for row_idx, pos in enumerate(closed_positions, start=2):
             is_win = pos["net_pnl"] >= 0
             fill_color = "E8F5E9" if is_win else "FFEBEE"
-            text_color = "1B7E1B" if is_win else "C62828"
+            text_color = "FF1B7E1B" if is_win else "FFC62828"
             
             fill_row = PatternFill(fill_type="solid", fgColor=fill_color)
             font_normal = Font(name="Arial", size=10, bold=False)
@@ -1285,14 +1313,14 @@ def export_journal():
         total_gross = sum(p["realized_pnl"] for p in closed_positions) if closed_positions else 0.0
         total_net = sum(p["net_pnl"] for p in closed_positions) if closed_positions else 0.0
         
-        color_gross = "1B7E1B" if total_gross >= 0 else "C62828"
-        color_net = "1B7E1B" if total_net >= 0 else "C62828"
+        color_gross = "FF1B7E1B" if total_gross >= 0 else "FFC62828"
+        color_net = "FF1B7E1B" if total_net >= 0 else "FFC62828"
         
         fill_total = PatternFill(fill_type="solid", fgColor="E8EAF6")
-        font_total_lbl = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        font_total_lbl = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
         font_total_val = Font(name="Calibri", size=11, bold=False)
         font_total_gross = Font(name="Arial", size=10, bold=True, color=color_gross)
-        font_total_fees = Font(name="Arial", size=10, bold=True, color="1B7E1B")
+        font_total_fees = Font(name="Arial", size=10, bold=True, color="FF1B7E1B")
         font_total_net = Font(name="Arial", size=10, bold=True, color=color_net)
 
         for col_idx in range(1, 11):
@@ -1326,8 +1354,14 @@ def export_journal():
         wb.save(out_buf)
         out_buf.seek(0)
         
+        # Determine output filename dynamically
+        filename = "trading_journal.xlsx"
+        if len(active_accounts) == 1:
+            clean_name = active_accounts[0].name.lower().replace(" ", "_")
+            filename = f"trading_journal_{clean_name}.xlsx"
+            
         output = make_response(out_buf.getvalue())
-        output.headers["Content-Disposition"] = "attachment; filename=trading_journal.xlsx"
+        output.headers["Content-Disposition"] = f"attachment; filename={filename}"
         output.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return output
         
