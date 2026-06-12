@@ -861,7 +861,7 @@
             <div class="card">
                 <div class="card-title">
                     <span>Closed Position History</span>
-                    <button class="btn btn-secondary btn-sm" onclick="exportJournal()">Export Trade Journal (CSV)</button>
+                    <button class="btn btn-secondary btn-sm" onclick="exportJournal()">Export Trade Journal (Excel)</button>
                 </div>
                 <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
@@ -1514,7 +1514,7 @@
 
         function exportJournal() {
             window.location.href = '/api/journal/export';
-            showToast('Exporting trade journal (CSV)...');
+            showToast('Exporting trade journal (Excel)...');
         }
 
         // Global variables for Closed Positions pagination

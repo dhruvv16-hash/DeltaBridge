@@ -1190,41 +1190,136 @@ def export_journal():
         # Sort chronologically by timestamp descending
         closed_positions.sort(key=lambda x: x.get("closed_at_raw", 0), reverse=True)
         
-        # Build CSV file
-        si = io.StringIO()
-        cw = csv.writer(si)
+        # Build Excel file
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
         
-        # CSV Headers
-        cw.writerow([
-            "Closed Time (UTC)",
-            "Account Name",
-            "Symbol",
-            "Side",
-            "Closed Size (Contracts)",
-            "Entry Price (USD)",
-            "Exit Price (USD)",
-            "Gross PnL (USD)",
-            "Fees & Commission (USD)",
-            "Net PnL (USD)"
-        ])
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Trading Journal"
         
-        for pos in closed_positions:
-            cw.writerow([
-                pos["closed_at"],
-                pos["account_name"],
-                pos["symbol"],
-                pos["side"],
-                pos["closed_size"],
-                f"{pos['entry_price']:.4f}",
-                f"{pos['close_price']:.4f}",
-                f"{pos['realized_pnl']:.4f}",
-                f"{pos['fees']:.4f}",
-                f"{pos['net_pnl']:.4f}"
-            ])
+        # Enable grid lines explicitly
+        ws.views.sheetView[0].showGridLines = True
+        
+        # Exact column widths matching target template
+        column_widths = {
+            'A': 22.0, 'B': 14.0, 'C': 10.0, 'D': 8.0, 'E': 20.0,
+            'F': 18.0, 'G': 17.0, 'H': 16.0, 'I': 22.0, 'J': 14.0
+        }
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
+
+        # Define Styles
+        font_header = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        fill_header = PatternFill(fill_type="solid", fgColor="1A1A2E")
+        align_center = Alignment(horizontal="center", vertical="center")
+        
+        border_thin_side = Side(style="thin", color="CCCCCC")
+        border_thin = Border(left=border_thin_side, right=border_thin_side, top=border_thin_side, bottom=border_thin_side)
+        
+        border_medium_side = Side(style="medium", color="000000")
+        border_medium = Border(left=border_medium_side, right=border_medium_side, top=border_medium_side, bottom=border_medium_side)
+
+        # Headers
+        headers = [
+            "CLOSED TIME (UTC)", "ACCOUNT NAME", "SYMBOL", "SIDE",
+            "CLOSED SIZE (CONTRACTS)", "ENTRY PRICE (USD)", "EXIT PRICE (USD)",
+            "GROSS PNL (USD)", "FEES & COMMISSION (USD)", "NET PNL (USD)"
+        ]
+        ws.append(headers)
+        for col_idx in range(1, 11):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = align_center
+            cell.border = border_medium
+
+        for row_idx, pos in enumerate(closed_positions, start=2):
+            is_win = pos["net_pnl"] >= 0
+            fill_color = "E8F5E9" if is_win else "FFEBEE"
+            text_color = "1B7E1B" if is_win else "C62828"
             
-        output = make_response(si.getvalue())
-        output.headers["Content-Disposition"] = "attachment; filename=trading_journal.csv"
-        output.headers["Content-type"] = "text/csv"
+            fill_row = PatternFill(fill_type="solid", fgColor=fill_color)
+            font_normal = Font(name="Arial", size=10, bold=False)
+            font_pnl = Font(name="Arial", size=10, bold=True, color=text_color)
+            
+            row_values = [
+                pos["closed_at"], pos["account_name"], pos["symbol"], pos["side"],
+                pos["closed_size"], pos["entry_price"], pos["close_price"],
+                pos["realized_pnl"], pos["fees"], pos["net_pnl"]
+            ]
+            
+            ws.append(row_values)
+            for col_idx in range(1, 11):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.fill = fill_row
+                cell.alignment = align_center
+                cell.border = border_thin
+                
+                # Formatting
+                if col_idx in [5, 6, 7, 8, 9, 10]:
+                    cell.number_format = "#,##0.0000"
+                else:
+                    cell.number_format = "@"
+                    
+                if col_idx in [8, 10]: # Gross PNL and Net PNL are bold and colored
+                    cell.font = font_pnl
+                else:
+                    cell.font = font_normal
+
+        # Total Row
+        last_row = len(closed_positions) + 1
+        total_row = last_row + 1
+        
+        ws.cell(row=total_row, column=1, value="TOTAL")
+        ws.cell(row=total_row, column=8, value=f"=SUM(H2:H{last_row})")
+        ws.cell(row=total_row, column=9, value=f"=SUM(I2:I{last_row})")
+        ws.cell(row=total_row, column=10, value=f"=SUM(J2:J{last_row})")
+        
+        # Calculate sum dynamically to determine coloring
+        total_gross = sum(p["realized_pnl"] for p in closed_positions) if closed_positions else 0.0
+        total_net = sum(p["net_pnl"] for p in closed_positions) if closed_positions else 0.0
+        
+        color_gross = "1B7E1B" if total_gross >= 0 else "C62828"
+        color_net = "1B7E1B" if total_net >= 0 else "C62828"
+        
+        fill_total = PatternFill(fill_type="solid", fgColor="E8EAF6")
+        font_total_lbl = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        font_total_val = Font(name="Calibri", size=11, bold=False)
+        font_total_gross = Font(name="Arial", size=10, bold=True, color=color_gross)
+        font_total_fees = Font(name="Arial", size=10, bold=True, color="1B7E1B")
+        font_total_net = Font(name="Arial", size=10, bold=True, color=color_net)
+
+        for col_idx in range(1, 11):
+            cell = ws.cell(row=total_row, column=col_idx)
+            cell.alignment = align_center
+            cell.border = border_medium
+            
+            if col_idx == 1:
+                cell.font = font_total_lbl
+                cell.fill = fill_header
+            else:
+                cell.fill = fill_total
+                if col_idx == 8:
+                    cell.font = font_total_gross
+                    cell.number_format = "#,##0.0000"
+                elif col_idx == 9:
+                    cell.font = font_total_fees
+                    cell.number_format = "#,##0.0000"
+                elif col_idx == 10:
+                    cell.font = font_total_net
+                    cell.number_format = "#,##0.0000"
+                else:
+                    cell.font = font_total_val
+                    
+        # Save to BytesIO buffer
+        out_buf = io.BytesIO()
+        wb.save(out_buf)
+        out_buf.seek(0)
+        
+        output = make_response(out_buf.getvalue())
+        output.headers["Content-Disposition"] = "attachment; filename=trading_journal.xlsx"
+        output.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         return output
         
     except Exception as e:

@@ -649,36 +649,42 @@ class TestPnLTracking(unittest.TestCase):
         
         response = self.app.get('/api/journal/export')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content_type, "text/csv")
-        self.assertIn("attachment; filename=trading_journal.csv", response.headers["Content-Disposition"])
+        self.assertEqual(response.content_type, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertIn("attachment; filename=trading_journal.xlsx", response.headers["Content-Disposition"])
         
-        # Decode and parse CSV output
-        csv_text = response.data.decode('utf-8')
-        lines = csv_text.splitlines()
+        # Load Excel output
+        import io
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(response.data))
+        ws = wb.active
+        self.assertEqual(ws.title, "Trading Journal")
         
         # Verify headers exist
-        self.assertGreater(len(lines), 1)
-        headers = lines[0].split(',')
-        self.assertEqual(headers[0], "Closed Time (UTC)")
-        self.assertEqual(headers[1], "Account Name")
-        self.assertEqual(headers[2], "Symbol")
-        self.assertEqual(headers[7], "Gross PnL (USD)")
-        self.assertEqual(headers[8], "Fees & Commission (USD)")
-        self.assertEqual(headers[9], "Net PnL (USD)")
+        self.assertEqual(ws.cell(row=1, column=1).value, "CLOSED TIME (UTC)")
+        self.assertEqual(ws.cell(row=1, column=2).value, "ACCOUNT NAME")
+        self.assertEqual(ws.cell(row=1, column=3).value, "SYMBOL")
+        self.assertEqual(ws.cell(row=1, column=8).value, "GROSS PNL (USD)")
+        self.assertEqual(ws.cell(row=1, column=9).value, "FEES & COMMISSION (USD)")
+        self.assertEqual(ws.cell(row=1, column=10).value, "NET PNL (USD)")
         
         # Verify data row values
-        row = lines[1].split(',')
-        self.assertEqual(row[1], "PnL Test Account")
-        self.assertEqual(row[2], "ETHUSD")
-        self.assertEqual(row[3], "LONG")
-        self.assertEqual(row[4], "10.0")
-        self.assertEqual(row[7], "2.0000") # Gross PnL
+        self.assertEqual(ws.cell(row=2, column=2).value, "PnL Test Account")
+        self.assertEqual(ws.cell(row=2, column=3).value, "ETHUSD")
+        self.assertEqual(ws.cell(row=2, column=4).value, "LONG")
+        self.assertEqual(ws.cell(row=2, column=5).value, 10.0)
+        self.assertEqual(ws.cell(row=2, column=8).value, 2.0)
         
         # Expected Fees: entry_notional = 2000 * 10 * 0.01 = 200. exit_notional = 2020 * 10 * 0.01 = 202.
         # total_notional = 402. fees = 402 * 0.0005 = 0.2010.
         # Expected Net PnL: 2.0 - 0.201 = 1.7990.
-        self.assertEqual(row[8], "0.2010") # Fees
-        self.assertEqual(row[9], "1.7990") # Net PnL
+        self.assertAlmostEqual(ws.cell(row=2, column=9).value, 0.2010)
+        self.assertAlmostEqual(ws.cell(row=2, column=10).value, 1.7990)
+        
+        # Verify Total row
+        self.assertEqual(ws.cell(row=3, column=1).value, "TOTAL")
+        self.assertEqual(ws.cell(row=3, column=8).value, "=SUM(H2:H2)")
+        self.assertEqual(ws.cell(row=3, column=9).value, "=SUM(I2:I2)")
+        self.assertEqual(ws.cell(row=3, column=10).value, "=SUM(J2:J2)")
 
 class TestSizingModels(unittest.TestCase):
     def setUp(self):
