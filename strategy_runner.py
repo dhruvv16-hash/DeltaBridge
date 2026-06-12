@@ -24,6 +24,24 @@ def send_strategy_notification(app, title, message, status_color=5763719):
     """Dispatches strategy alerts to Discord/Telegram using existing notification helper in app."""
     try:
         from app import send_notification
+        from models import GlobalSetting
+        
+        # Prepend Dry-Run tag if enabled
+        dry_run = True
+        if os.getenv("FLASK_ENV") != "testing":
+            try:
+                with app.app_context():
+                    dry_run_s = GlobalSetting.query.filter_by(key="local_bot_dry_run").first()
+                    if dry_run_s:
+                        dry_run = dry_run_s.value.lower() == "true"
+            except Exception as e:
+                logger.error(f"Failed to read local_bot_dry_run: {e}")
+        else:
+            dry_run = False
+            
+        if dry_run:
+            title = f"🔍 [Dry-Run] {title}"
+            
         if os.getenv("FLASK_ENV") == "testing":
             send_notification(title, message, status_color)
         else:
@@ -166,6 +184,119 @@ def run_strategy_for_account(app, account, client):
     last_completed_time = df["time"].iloc[candle_idx]
     last_close = df["close"].iloc[candle_idx]
     
+    # Fetch global dry-run setting
+    dry_run = True
+    if os.getenv("FLASK_ENV") != "testing":
+        try:
+            with app.app_context():
+                from models import GlobalSetting
+                dry_run_s = GlobalSetting.query.filter_by(key="local_bot_dry_run").first()
+                if dry_run_s:
+                    dry_run = dry_run_s.value.lower() == "true"
+        except Exception as e:
+            logger.error(f"Failed to read local_bot_dry_run: {e}")
+    else:
+        dry_run = False
+
+    if dry_run:
+        # Mock client.get_position to return our local virtual position size
+        def mock_get_position(prod_id):
+            return {
+                "size": position_size,
+                "entry_price": entry_price or 0.0,
+                "product_id": prod_id
+            }
+        client.get_position = mock_get_position
+
+        # Wrap client.place_order to prevent real execution and log to DB instead
+        def mock_place_order(prod_id, size, side, order_type="market_order", reduce_only=False):
+            logger.info(f"[Dry-Run Mode] Simulating local strategy order for account '{account_name}': {side.upper()} {size} lots on product ID {prod_id} (Reduce Only: {reduce_only})")
+            
+            # Fetch current ticker mark price
+            ticker_data_live = client.get_ticker(SYMBOL)
+            current_price_live = float(ticker_data_live.get("mark_price") or ticker_data_live.get("last_price") or last_close)
+            
+            # Determine signal type
+            if not reduce_only:
+                sig_type = "BUY" if side == "buy" else "SELL"
+            else:
+                if position_size > 0:
+                    if side == "sell":
+                        if abs(size - int(math.floor(position_size * 0.5))) <= 1:
+                            sig_type = "TP1"
+                        elif abs(size - int(math.floor(position_size * 0.3))) <= 1:
+                            sig_type = "TP2"
+                        elif current_price_live <= (current_sl or 0.0):
+                            sig_type = "SL"
+                        else:
+                            sig_type = "EXIT_ZLSMA" if USE_ZLSMA_EXIT else "EXIT_LIQUIDITY"
+                    else:
+                        sig_type = "BUY"
+                elif position_size < 0:
+                    if side == "buy":
+                        if abs(size - int(math.floor(abs(position_size) * 0.5))) <= 1:
+                            sig_type = "TP1"
+                        elif abs(size - int(math.floor(abs(position_size) * 0.3))) <= 1:
+                            sig_type = "TP2"
+                        elif current_price_live >= (current_sl or 0.0):
+                            sig_type = "SL"
+                        else:
+                            sig_type = "EXIT_ZLSMA" if USE_ZLSMA_EXIT else "EXIT_LIQUIDITY"
+                    else:
+                        sig_type = "SELL"
+                else:
+                    sig_type = "CLOSE_EMERGENCY"
+            
+            # Save simulated signal log to database (short context)
+            with app.app_context():
+                try:
+                    from models import LocalSignalLog, StrategyState
+                    state_db = StrategyState.query.filter_by(account_id=account_id, symbol=SYMBOL, strategy_id=None).first()
+                    
+                    stop_loss_val = None
+                    tp1_val = None
+                    tp2_val = None
+                    if state_db:
+                        stop_loss_val = state_db.current_sl
+                        tp1_val = state_db.tp1_price
+                        tp2_val = state_db.tp2_price
+                        
+                    if sig_type in ["BUY", "SELL"]:
+                        stop_px = signals["long_stop"][candle_idx] if sig_type == "BUY" else signals["short_stop"][candle_idx]
+                        if not np.isnan(stop_px):
+                            stop_loss_val = stop_px
+                            sl_dist_calc = max(abs(current_price_live - stop_px), tick_size)
+                            tp1_val = current_price_live + sl_dist_calc * TP1_RR if sig_type == "BUY" else current_price_live - sl_dist_calc * TP1_RR
+                            tp2_val = current_price_live + sl_dist_calc * TP2_RR if sig_type == "BUY" else current_price_live - sl_dist_calc * TP2_RR
+                    
+                    log = LocalSignalLog(
+                        account_id=account_id,
+                        account_name=account_name,
+                        signal_type=sig_type,
+                        price=current_price_live,
+                        quantity=float(size),
+                        stop_loss=float(stop_loss_val) if stop_loss_val else None,
+                        take_profit_1=float(tp1_val) if tp1_val else None,
+                        take_profit_2=float(tp2_val) if tp2_val else None,
+                        is_matched=False
+                    )
+                    db.session.add(log)
+                    db.session.commit()
+                    logger.info(f"[Dry-Run Mode] Saved LocalSignalLog to DB: {sig_type} at {current_price_live}")
+                except Exception as log_e:
+                    logger.error(f"[Dry-Run Mode] Failed to save LocalSignalLog: {log_e}")
+            
+            # Return mock order success response
+            return {
+                "success": True,
+                "result": {
+                    "id": f"sim_{int(time.time() * 1000)}",
+                    "average_fill_price": current_price_live,
+                    "price": current_price_live
+                }
+            }
+        client.place_order = mock_place_order
+
     # Get current ticker price for monitoring active trade exits
     ticker_data = client.get_ticker(SYMBOL)
     if not ticker_data:

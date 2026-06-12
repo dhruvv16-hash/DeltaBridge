@@ -126,3 +126,33 @@ class StrategyState(db.Model):
             "last_signal_time": self.last_signal_time,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
+
+class LocalSignalLog(db.Model):
+    __tablename__ = 'local_signal_logs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=db.func.now(), nullable=False)
+    account_id = db.Column(db.Integer, nullable=False)
+    account_name = db.Column(db.String(100), nullable=False)
+    signal_type = db.Column(db.String(50), nullable=False) # e.g. "BUY", "SELL", "TP1", "TP2", "SL", "EXIT_ZLSMA", "EXIT_LIQUIDITY"
+    price = db.Column(db.Float, nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    stop_loss = db.Column(db.Float, nullable=True)
+    take_profit_1 = db.Column(db.Float, nullable=True)
+    take_profit_2 = db.Column(db.Float, nullable=True)
+    is_matched = db.Column(db.Boolean, default=False, nullable=False)
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "account_id": self.account_id,
+            "account_name": self.account_name,
+            "signal_type": self.signal_type,
+            "price": self.price,
+            "quantity": self.quantity,
+            "stop_loss": self.stop_loss,
+            "take_profit_1": self.take_profit_1,
+            "take_profit_2": self.take_profit_2,
+            "is_matched": self.is_matched
+        }

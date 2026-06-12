@@ -644,7 +644,7 @@
         <!-- GLOBAL CONFIGURATION TAB PANEL -->
         <section id="settings-tab" class="tab-panel">
             <div class="card">
-                <div class="card-title">Global Webhook Authentication</div>
+                <div class="card-title">Global Settings</div>
                 <div class="form-grid" style="grid-template-columns: 1fr;">
                     <div class="form-group">
                         <label for="passphrase">Security Passphrase</label>
@@ -653,8 +653,22 @@
                             This passphrase must match the payload passphrase sent in your TradingView webhook.
                         </span>
                     </div>
-                    <div class="form-group" style="margin-top: 1rem;">
-                        <button id="save-settings-btn" class="btn btn-primary" style="max-width: 200px;">Save Passphrase</button>
+                    
+                    <div class="form-group" style="margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem; display: flex; align-items: center; gap: 1rem;">
+                        <label class="switch">
+                            <input type="checkbox" id="local-bot-dry-run-toggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                        <div>
+                            <span style="font-weight: 600; display: block;">Local Bot Dry-Run Mode (Monitor Only)</span>
+                            <span style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-top: 0.15rem;">
+                                If enabled, the local strategy runner scans indicators and logs simulated signals to the database, but does not place actual orders on the exchange. Turn off to enable live autonomous trading.
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group" style="margin-top: 1.5rem;">
+                        <button id="save-settings-btn" class="btn btn-primary" style="max-width: 200px;">Save Settings</button>
                     </div>
                 </div>
             </div>
@@ -871,6 +885,7 @@
                             <option value="all">All Accounts</option>
                         </select>
                         <button id="export-journal-btn" class="btn btn-secondary btn-sm" onclick="triggerFilteredExport()">Export Trade Journal (Excel)</button>
+                        <button id="export-local-signals-btn" class="btn btn-secondary btn-sm" onclick="exportLocalSignals()" style="background-color: rgba(139, 92, 246, 0.15); border-color: #8b5cf6; color: #a78bfa;">Export Local Signals (Excel)</button>
                     </div>
                 </div>
                 <div style="overflow-x: auto;">
@@ -1451,6 +1466,10 @@
                 document.getElementById('discord-enabled-toggle').checked = settings.discord_enabled === "true";
                 document.getElementById('discord-webhook-url').value = settings.discord_webhook_url || "";
                 
+                if (settings.hasOwnProperty('local_bot_dry_run')) {
+                    document.getElementById('local-bot-dry-run-toggle').checked = settings.local_bot_dry_run;
+                }
+                
                 if (settings.ws_url) {
                     connectWebSocket(settings.ws_url);
                 }
@@ -1510,20 +1529,21 @@
             }
         });
 
-        // Save global passphrase
+        // Save global passphrase and local dry run
         document.getElementById('save-settings-btn').addEventListener('click', async function() {
             const passphrase = document.getElementById('passphrase').value;
+            const local_bot_dry_run = document.getElementById('local-bot-dry-run-toggle').checked;
             try {
                 const response = await fetch('/api/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ passphrase })
+                    body: JSON.stringify({ passphrase, local_bot_dry_run })
                 });
                 
                 if (response.ok) {
-                    showToast("Passphrase saved successfully!");
+                    showToast("Settings saved successfully!");
                 } else {
-                    showToast("Failed to save passphrase", false);
+                    showToast("Failed to save settings", false);
                 }
             } catch (err) {
                 showToast("Server error occurred", false);
@@ -1941,6 +1961,11 @@
             }
             window.location.href = url;
             showToast('Exporting trade journal (Excel)...');
+        }
+
+        function exportLocalSignals() {
+            window.location.href = '/api/local-signals/export';
+            showToast('Exporting local signals (Excel)...');
         }
 
         // Global variables for Closed Positions pagination

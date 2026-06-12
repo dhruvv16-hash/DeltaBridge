@@ -5,7 +5,7 @@ import logging
 from flask import Flask, request, jsonify, render_template, make_response
 from config import Config
 from delta_client import DeltaClient
-from models import db, Account, GlobalSetting, TradeLog, Strategy, StrategyState
+from models import db, Account, GlobalSetting, TradeLog, Strategy, StrategyState, LocalSignalLog
 
 # Configure logging
 logging.basicConfig(
@@ -560,6 +560,7 @@ def get_settings():
     telegram_chat_id = GlobalSetting.query.filter_by(key="telegram_chat_id").first()
     discord_enabled = GlobalSetting.query.filter_by(key="discord_enabled").first()
     discord_webhook_url = GlobalSetting.query.filter_by(key="discord_webhook_url").first()
+    local_bot_dry_run = GlobalSetting.query.filter_by(key="local_bot_dry_run").first()
     
     base_url = Config.BASE_URL.lower()
     if "testnet" in base_url:
@@ -576,6 +577,7 @@ def get_settings():
         "telegram_chat_id": telegram_chat_id.value if telegram_chat_id else "",
         "discord_enabled": discord_enabled.value if discord_enabled else "false",
         "discord_webhook_url": discord_webhook_url.value if discord_webhook_url else "",
+        "local_bot_dry_run": (local_bot_dry_run.value == "true") if local_bot_dry_run else True,
         "ws_url": ws_url
     })
 
@@ -584,9 +586,9 @@ def save_settings():
     data = request.get_json(silent=True) or {}
     
     # We update all settings passed
-    for key in ["passphrase", "telegram_enabled", "telegram_token", "telegram_chat_id", "discord_enabled", "discord_webhook_url"]:
+    for key in ["passphrase", "telegram_enabled", "telegram_token", "telegram_chat_id", "discord_enabled", "discord_webhook_url", "local_bot_dry_run"]:
         if key in data:
-            val = str(data[key])
+            val = str(data[key]).lower() if key == "local_bot_dry_run" else str(data[key])
             setting = GlobalSetting.query.filter_by(key=key).first()
             if setting:
                 setting.value = val
@@ -1568,6 +1570,130 @@ def export_journal():
         logger.exception(f"Error exporting trade journal: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route("/api/local-signals/export", methods=["GET"])
+def export_local_signals():
+    """Generates and downloads an Excel file containing all local strategy dry-run signal logs."""
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    
+    try:
+        # Fetch all signal logs sorted by timestamp descending
+        logs = LocalSignalLog.query.order_by(LocalSignalLog.timestamp.desc()).all()
+        
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Local Bot Signals"
+        
+        ws.views.sheetView[0].showGridLines = True
+        
+        # Column widths
+        column_widths = {
+            'A': 22.0,  # Date/Time
+            'B': 18.0,  # Account Name
+            'C': 15.0,  # Signal Type
+            'D': 15.0,  # Price
+            'E': 15.0,  # Quantity (Lots)
+            'F': 15.0,  # Stop Loss
+            'G': 15.0,  # Take Profit 1
+            'H': 15.0,  # Take Profit 2
+            'I': 15.0   # Matched?
+        }
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
+            
+        # Styles
+        font_header = Font(name="Arial", size=10, bold=True, color="FFFFFFFF")
+        # Dark purple theme for local signals to distinguish from trade journal
+        fill_header = PatternFill(fill_type="solid", fgColor="FF4C1D95") 
+        align_center = Alignment(horizontal="center", vertical="center")
+        align_header = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        
+        border_thin_side = Side(style="thin", color="FFCCCCCC")
+        border_thin = Border(left=border_thin_side, right=border_thin_side, top=border_thin_side, bottom=border_thin_side)
+        
+        border_medium_side = Side(style="medium", color="FF000000")
+        border_medium = Border(left=border_medium_side, right=border_medium_side, top=border_medium_side, bottom=border_medium_side)
+        
+        ws.row_dimensions[1].height = 32.0
+        
+        headers = [
+            "DATE/TIME (UTC)", "ACCOUNT NAME", "SIGNAL TYPE", "PRICE (USD)",
+            "QUANTITY (LOTS)", "STOP LOSS (USD)", "TAKE PROFIT 1 (USD)", "TAKE PROFIT 2 (USD)", "MATCHED?"
+        ]
+        ws.append(headers)
+        for col_idx in range(1, 10):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = align_header
+            cell.border = border_medium
+            
+        for row_idx, log in enumerate(logs, start=2):
+            sig = log.signal_type.upper()
+            
+            # Highlight entries
+            if sig in ["BUY", "LONG"]:
+                fill_color = "FFE8F5E9"  # light green
+                text_color = "FF1B7E1B"
+            elif sig in ["SELL", "SHORT"]:
+                fill_color = "FFFFEBEE"  # light red
+                text_color = "FFC62828"
+            elif sig in ["TP1", "TP2"]:
+                fill_color = "FFE8EAF6"  # light blue
+                text_color = "FF3F51B5"
+            else:
+                fill_color = "FFFFF9C4"  # light yellow
+                text_color = "FFF57F17"
+                
+            fill_row = PatternFill(fill_type="solid", fgColor=fill_color)
+            font_normal = Font(name="Arial", size=10, bold=False)
+            font_bold_color = Font(name="Arial", size=10, bold=True, color=text_color)
+            
+            row_values = [
+                log.timestamp.strftime("%Y-%m-%d %H:%M:%S") if log.timestamp else "",
+                log.account_name,
+                sig,
+                log.price,
+                log.quantity,
+                log.stop_loss,
+                log.take_profit_1,
+                log.take_profit_2,
+                "YES" if log.is_matched else "NO"
+            ]
+            
+            ws.append(row_values)
+            for col_idx in range(1, 10):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.fill = fill_row
+                cell.alignment = align_center
+                cell.border = border_thin
+                
+                # Format numbers
+                if col_idx in [4, 6, 7, 8]:
+                    cell.number_format = "#,##0.0000"
+                elif col_idx == 5:
+                    cell.number_format = "#,##0"
+                else:
+                    cell.number_format = "@"
+                    
+                if col_idx == 3: # Signal Type is bold and colored
+                    cell.font = font_bold_color
+                else:
+                    cell.font = font_normal
+                    
+        out_buf = io.BytesIO()
+        wb.save(out_buf)
+        out_buf.seek(0)
+        
+        response = make_response(out_buf.getvalue())
+        response.headers["Content-Disposition"] = "attachment; filename=local_bot_signals.xlsx"
+        response.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        return response
+        
+    except Exception as e:
+        logger.exception(f"Failed to export local signals: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/api/email-settings", methods=["GET"])
@@ -2887,6 +3013,13 @@ if os.getenv("FLASK_ENV") != "testing":
             db.session.add(GlobalSetting(key="passphrase", value=initial_passphrase))
             db.session.commit()
             logger.info(f"Initialized default passphrase in database: {initial_passphrase}")
+        
+        # Initialize default local_bot_dry_run setting to true if not present
+        dry_run_setting = GlobalSetting.query.filter_by(key="local_bot_dry_run").first()
+        if not dry_run_setting:
+            db.session.add(GlobalSetting(key="local_bot_dry_run", value="true"))
+            db.session.commit()
+            logger.info("Initialized default local_bot_dry_run setting to true.")
         
         # Dispose the engine pool so that Gunicorn workers do not inherit open connection sockets
         try:
