@@ -1130,6 +1130,9 @@ class TestCircuitBreaker(unittest.TestCase):
         db.session.expunge_all()
         db.create_all()
         
+        # Clear existing passphrase to ensure clean test environment
+        GlobalSetting.query.filter_by(key="passphrase").delete()
+        
         # Seed test passphrase
         db.session.add(GlobalSetting(key="passphrase", value="test_passphrase"))
         

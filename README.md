@@ -9,6 +9,18 @@ This is a professional, production-grade Python web service designed to bridge *
 * 🔄 **Position Reversals/Close Actions:** Supports `buy`, `sell`, `close_long`, and `close_short` actions with automated position size scanning.
 * ⏱️ **Free 24/7 Deployment:** Fully configured to deploy on Render (Free Tier) and keep awake via UptimeRobot.
 
+## 📊 Dashboard Preview
+
+The bot includes a premium, high-fidelity dark-mode web dashboard featuring live balance monitoring, performance analytics, and webhook testing tools.
+
+### 1. Accounts & Risk Management
+View configured accounts, live API connectivity statuses, current balances, and configure default leverages, sizing modes, and safety buffers.
+![Accounts & Risk Management](screenshots/dashboard_accounts.jpg)
+
+### 2. Trades, PnL & Analytics
+Review live trading performance, cumulative PnL graphs, key trading metrics (Win Rate, Profit Factor, Net PnL), and detailed trade execution logs.
+![Trades, PnL & Analytics](screenshots/dashboard_analytics.jpg)
+
 ---
 
 ## 1. Setup Delta Exchange API Credentials
