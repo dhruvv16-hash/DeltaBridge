@@ -6,7 +6,7 @@ The system also includes a background strategy runner daemon that can fetch live
 
 ---
 
-## 🏗️ System Architecture & Design
+##  System Architecture & Design
 
 The bot is structured into two concurrent components:
 1. **The Webhook Listener (Flask API)**: An event-driven server that executes orders instantly upon receiving TradingView alert requests.
@@ -120,7 +120,7 @@ graph TD
 
 ---
 
-## 📊 Dashboard Preview
+##  Dashboard Preview
 
 The bot includes a premium, dark-mode web dashboard featuring live balance monitoring, performance analytics, and webhook testing tools.
 
@@ -134,7 +134,7 @@ Review live trading performance, cumulative PnL graphs, key trading metrics (Win
 
 ---
 
-## 🛠️ Environment Variables Configuration
+##  Environment Variables Configuration
 
 Configure these environment variables in your server configuration (or a local `.env` file):
 
@@ -150,7 +150,7 @@ Configure these environment variables in your server configuration (or a local `
 
 ---
 
-## 🚀 Quick Start Guide
+##  Quick Start Guide
 
 ### 1. Installation
 Clone the repository and install the dependencies:
@@ -182,7 +182,7 @@ python -m unittest verify_bot.py verify_strategy.py
 
 ---
 
-## 📈 Custom Strategy Logic Integration
+##  Custom Strategy Logic Integration
 
 The bot includes placeholders to let you easily plug in your own custom trading indicators and entry/exit conditions:
 
